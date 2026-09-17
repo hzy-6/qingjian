@@ -74,6 +74,59 @@ pub fn transposition_candidates(input: &str) -> Vec<Correction> {
     candidates_from(input, transpositions)
 }
 
+/// 双错联合纠错的第二处编辑的高频变体（在第一处编辑后的串上枚举）：
+/// 换位、敲到相邻键、多敲。替换只算相邻键——两处都替换时其中一处多半敲在要的键旁边，
+/// 全字母表替换会把候选对翻一个数量级，还几乎全是凑巧拼上的噪音；
+/// 漏字不在此列（补哪一格字母没法收窄），漏字敲错靠第一处编辑的插入变体去接。
+/// 完整性由调用方把关（能完整切分才算候选），这里只管生成。
+pub fn second_variants(input: &str) -> Vec<(Edit, String)> {
+    let bytes = input.as_bytes();
+    let n = bytes.len();
+    let mut out = Vec::with_capacity(n * 6);
+    for i in 0..n.saturating_sub(1) {
+        if bytes[i] != bytes[i + 1] {
+            let mut v = bytes.to_vec();
+            v.swap(i, i + 1);
+            out.push((
+                Edit::Transpose {
+                    index: i,
+                    first: bytes[i] as char,
+                    second: bytes[i + 1] as char,
+                },
+                String::from_utf8(v).expect("ascii"),
+            ));
+        }
+    }
+    for i in 0..n {
+        for letter in b'a'..=b'z' {
+            if letter == bytes[i] || !typo::adjacent(bytes[i] as char, letter as char) {
+                continue;
+            }
+            let mut v = bytes.to_vec();
+            v[i] = letter;
+            out.push((
+                Edit::Substitute {
+                    index: i,
+                    from: bytes[i] as char,
+                },
+                String::from_utf8(v).expect("ascii"),
+            ));
+        }
+    }
+    for i in 0..n {
+        let mut v = bytes.to_vec();
+        v.remove(i);
+        out.push((
+            Edit::Delete {
+                index: i,
+                removed: bytes[i] as char,
+            },
+            String::from_utf8(v).expect("ascii"),
+        ));
+    }
+    out
+}
+
 fn candidates_from(input: &str, variants: Vec<(Edit, String)>) -> Vec<Correction> {
     if !eligible(input) {
         return Vec::new();
@@ -87,6 +140,7 @@ fn candidates_from(input: &str, variants: Vec<(Edit, String)>) -> Vec<Correction
                 original: input.to_owned(),
                 corrected,
                 edit,
+                second: None,
                 segmentation,
             })
         })
@@ -137,5 +191,23 @@ mod tests {
         assert!(found.iter().any(
             |c| c.corrected == "nihaoma" && matches!(c.edit, Edit::Transpose { index: 3, .. })
         ));
+    }
+
+    /// 第二处编辑只出高频类型，且替换限相邻键：数量远小于全量一处编辑，噪音也少。
+    #[test]
+    fn second_edit_variants_are_high_frequency_only() {
+        let all = second_variants("nihao");
+        let texts: Vec<&str> = all.iter().map(|(_, t)| t.as_str()).collect();
+        // 换位、相邻键替换、多敲都在
+        assert!(texts.contains(&"inhao"));
+        assert!(texts.contains(&"nigao"));
+        assert!(texts.contains(&"niha"));
+        // 不出不相邻键的替换（h → d）与插入
+        assert!(!texts.contains(&"nidao"));
+        assert!(!texts.contains(&"nihaoo"));
+        // 数量级：5 个字母 ≈ 4 换位 + 十几个相邻替换 + 5 删除，远小于全量的 300+
+        assert!(all.len() < 60);
+        // 全量一处编辑对同一输入要大得多
+        assert!(variants("nihao").len() > all.len());
     }
 }

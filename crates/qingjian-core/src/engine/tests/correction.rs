@@ -364,3 +364,134 @@ fn fuzzy_rules_add_homophones_behind_exact_hits() {
     assert_eq!(all[0], "开发");
     assert_eq!(all.iter().filter(|t| *t == "开发").count(), 1);
 }
+
+/// 长句测试共用的词库：今天天气冷吗。冷 / 坑 同音节差好几个数量级的词频，
+/// 好让双错候选扣完两次代价与额外惩罚还能赢过安全 margin。
+fn sentence_dictionary() -> Dictionary {
+    Dictionary::parse(
+        "今天\tjin tian\t6000\n天气\ttian qi\t50000\n冷\tleng\t900000\n坑\tkeng\t10\n\
+         吗\tma\t70000\n吧\tba\t50000\n你好吗\tni hao ma\t5000\n你好\tni hao\t9000\n\
+         你\tni\t90000\n好\thao\t80000\n",
+    )
+    .unwrap()
+}
+
+/// 长句中间一处错误：`wi`（qi 敲成旁边的 w）把整段切弄坏了，错误不在句尾，
+/// 整段一处编辑的纠错把整句读出来。
+#[test]
+fn single_error_mid_sentence_still_corrects() {
+    let mut engine = Engine::new(sentence_dictionary());
+    engine.set_input("jintiantianwilengma");
+    let query = engine.query().unwrap();
+    assert_eq!(
+        query.correction.as_ref().expect("纠出 wi→qi").corrected,
+        "jintiantianqilengma"
+    );
+    assert_eq!(query.candidates.items[0].text, "今天天气冷吗");
+}
+
+/// 原样能得到自然整句的长句不纠：没有不像话的切分就不进纠错，候选留原样的读法。
+#[test]
+fn well_formed_long_sentence_keeps_its_reading() {
+    let mut engine = Engine::new(sentence_dictionary());
+    engine.set_input("jintiantianqilengma");
+    let query = engine.query().unwrap();
+    assert!(query.correction.is_none());
+    assert_eq!(query.candidates.items[0].text, "今天天气冷吗");
+}
+
+/// 长句中间两处错误（q→w、l→k，都在键盘邻位）联合纠正：单错只能修出 今天天气坑吗，
+/// 双错候选扣两次纠错代价与第二处的额外惩罚后仍明显胜出，整句正确；
+/// 上屏吃整段原串并给两处各记一对敲错，回车原样上屏过的串以后不纠。
+#[test]
+fn double_error_mid_sentence_corrects_both() {
+    let mut engine =
+        Engine::new(sentence_dictionary()).with_learner(Box::new(CountingLearner(HashMap::new())));
+    engine.set_input("jintiantianwikengma");
+    let query = engine.query().unwrap();
+    let correction = query.correction.clone().expect("两处敲错一起修出来");
+    assert_eq!(correction.corrected, "jintiantianqilengma");
+    assert!(matches!(
+        correction.edit,
+        Edit::Substitute {
+            index: 11,
+            from: 'w'
+        }
+    ));
+    assert_eq!(
+        correction.second,
+        Some(Edit::Substitute {
+            index: 13,
+            from: 'k'
+        })
+    );
+    assert_eq!(query.candidates.items[0].text, "今天天气冷吗");
+    // 上屏消耗整段原串，两处编辑各记一对 (敲的, 要的)
+    let first = query.candidates.items[0].clone();
+    assert_eq!(engine.commit(&first), "今天天气冷吗");
+    assert!(engine.composition().is_empty());
+    assert_eq!(engine.learner().typo_count("wi", "qi"), 1);
+    assert_eq!(engine.learner().typo_count("keng", "leng"), 1);
+    // 回车原样上屏过的串以后不纠
+    engine.set_input("jintiantianwikengma");
+    assert!(engine.query().unwrap().correction.is_some());
+    assert_eq!(engine.take_raw(), "jintiantianwikengma");
+    engine.set_input("jintiantianwikengma");
+    assert!(engine.query().unwrap().correction.is_none());
+}
+
+/// 错误过多不乱猜：三处敲错（wi、leng→keng、ma→ba）两处编辑修不全，
+/// 正确整句不该被任何候选冒充；修正最多叠两处编辑，宁可修出一个通顺但不同的句子。
+#[test]
+fn three_errors_do_not_produce_the_right_sentence() {
+    let mut engine = Engine::new(sentence_dictionary());
+    engine.set_input("jintiantianwikengba");
+    let query = engine.query().unwrap();
+    assert!(
+        query
+            .candidates
+            .items
+            .iter()
+            .all(|c| c.text != "今天天气冷吗")
+    );
+    if let Some(correction) = &query.correction {
+        assert_ne!(correction.corrected, "jintiantianqilengma");
+        // 修正至多两处编辑
+        assert!(correction.second.is_some());
+    }
+}
+
+/// 长拼音（24 个字母，正抵整段纠错的上限）带两处错误：预算把工作量钉死，
+/// 候选数量随长度线性而非指数涨，整句仍纠得出来。
+#[test]
+fn long_input_with_two_errors_stays_bounded() {
+    let mut engine = Engine::new(sentence_dictionary());
+    engine.set_input("nihaomajintiantianwikeng");
+    let start = std::time::Instant::now();
+    let query = engine.query().unwrap();
+    let elapsed = start.elapsed();
+    assert_eq!(
+        query
+            .correction
+            .as_ref()
+            .expect("长句双错也纠出来")
+            .corrected,
+        "nihaomajintiantianqileng"
+    );
+    assert_eq!(query.candidates.items[0].text, "你好吗今天天气冷");
+    // 双错搜索的上限是 6144 次切分检查 + 192 次整句转换（每种子至多 12 次，占位音节的转换也计数），与字母数线性相关；
+    // 真要是按变体做笛卡尔积，这个量级的输入早就到分钟级了。上限放宽到秒级只为防回归。
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "查询耗时 {elapsed:?}"
+    );
+}
+
+/// 双拼开着时整段纠错整路关闭，两处编辑的联合纠错也一样不碰它。
+#[test]
+fn double_correction_never_touches_shuangpin() {
+    let mut engine = xiaohe();
+    engine.set_input("jintiantianwikengma");
+    let query = engine.query().unwrap();
+    assert!(query.correction.is_none());
+}

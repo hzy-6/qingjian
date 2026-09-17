@@ -19,6 +19,49 @@ pub enum Edit {
 }
 
 impl Edit {
+    /// 这处编辑落在（应用它之前的）串里的位置：换位取前一位，删除取被删的那位。
+    pub fn position(&self) -> usize {
+        match *self {
+            Self::Substitute { index, .. }
+            | Self::Insert { index }
+            | Self::Transpose { index, .. }
+            | Self::Delete { index, .. } => index,
+        }
+    }
+
+    /// （本编辑应用前的）串里 `at` 处的间隙在（应用后的）串里落在哪：第二处编辑的画线位置
+    /// 按它换算到最终串的坐标系。`at` 正好是被删字母的位置时取原地（画线语义是「画在这一位之前」）。
+    pub fn map_gap_backward(&self, at: usize) -> usize {
+        match *self {
+            Self::Substitute { .. } | Self::Transpose { .. } => at,
+            // 应用后串在 index 处少一个字母：之后的间隙往前挪一位
+            Self::Delete { index, .. } => {
+                if at > index {
+                    at - 1
+                } else {
+                    at
+                }
+            }
+            // 应用后串在 index 处多一个字母：之后的间隙往后挪一位
+            Self::Insert { index } if at >= index => at + 1,
+            Self::Insert { .. } => at,
+        }
+    }
+
+    /// [`Self::map_gap_backward`] 的逆：应用后串里的间隙 `gap` 对应应用前串里的哪个间隙。
+    /// 双错删除线换算到同一间隙时按原串里的先后排（两处编辑各自的被改字母在原串的位置）。
+    pub fn gap_in_source(&self, gap: usize) -> usize {
+        match *self {
+            Self::Substitute { .. } | Self::Transpose { .. } => gap,
+            // 应用后串在 index 处少一个字母：之后的间隙在原串里后移一位
+            Self::Delete { index, .. } if gap > index => gap + 1,
+            Self::Delete { .. } => gap,
+            // 应用后串在 index 处多一个字母：之后的间隙在原串里前移一位
+            Self::Insert { index } if gap > index => gap - 1,
+            Self::Insert { .. } => gap,
+        }
+    }
+
     /// 纠正后串开头 `corrected_len` 个字母对应原串开头多少个字母：候选按纠正后的音节消耗拼音，
     /// 消耗掉的原串长度要按这处编辑换算回去。
     pub fn to_original(&self, corrected_len: usize) -> usize {

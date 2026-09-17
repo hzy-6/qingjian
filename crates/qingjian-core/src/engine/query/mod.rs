@@ -230,7 +230,7 @@ impl Engine {
             // 纠错生效时覆盖的是纠正后的字母，换算回原串再查「这个输入串下选过什么」
             let covered = correction
                 .as_ref()
-                .map_or(item.coverage, |c| c.edit.to_original(item.coverage));
+                .map_or(item.coverage, |c| c.to_original(item.coverage));
             let choice = letters
                 .get(..covered)
                 .map_or(0, |input| self.learner.choice_weight(input, hit.text));

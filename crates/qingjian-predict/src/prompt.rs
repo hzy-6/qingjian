@@ -11,12 +11,15 @@ syllables（切分出的音节数，仅供参考）、before / after（当前光
 local_sentence（本地整句转换的结果，可能错）、local_candidates（本地词库排在前面的候选，第一个是本地首选）、max_items、want_sentence。
 
 **local_candidates 和 local_sentence 只是本地的猜测，可能全错。**它们的用途是告诉你本地已经能给什么：\
-和它们重复的词会被丢掉，所以不要照抄；也不要被它们带偏——请只根据 letters 与 before / after 独立判断用户想打什么。
+和它们重复的词会被丢掉，所以不要照抄；也不要被它们带偏——请只根据 letters 与 before / after 独立判断用户想打什么。\
+本地结果可能还带着没修完的敲错，不要照抄它的错法；本地整句读起来已经通顺就不要为了纠错而改写它。
 
 输出 JSON：{\"words\": [{\"text\": \"…\", \"pinyin\": \"…\"}], \"sentence\": \"…\" 或 null}
 
 words：用户最可能想输入、而本地又给不出（或排错了）的词或短语，0 到 max_items 个，按可能性排序。要求：
-- 按 letters 推断用户想打什么，允许纠正错字、漏字、多字（如 zhgdoima → 这个东西吗）；pinyin 给该词**正确**的全拼，音节间用空格，字数等于音节数，\
+- 按 letters 推断用户想打什么；letters 里可能有**至多两处**明显的敲错（错字、漏字、多字、相邻两键敲反），\
+  纠正时最多改两处，超过两处就按读得最通顺的读法来（如 zhgdoima → 这个东西吗）；\
+  pinyin 给该词**正确**的全拼，音节间用空格，字数等于音节数，\
   不要比用户敲的多出或少掉音节；
 - 你的价值在：本地词库缺的术语、新词、人名机构名、缩写扩展；按 before / after 体现的领域（财务、软件开发、医学……）选对同音词；纠正错拼；
 - 本地首选已经对了就不必再给同一个词；没有更好的就给空数组，不要凑数。
@@ -300,6 +303,42 @@ mod tests {
         assert!(prompt.contains("\"pinyin\":\"zhang'tao\""));
         assert!(prompt.contains("\"syllables\":2"));
         assert!(prompt.contains("\"local_candidates\":[\"张涛\",\"张贴\"]"));
+    }
+
+    /// 组句提示词要交代清楚：模型同时参考 letters / pinyin / 本地候选 / 本地整句 / before / after，
+    /// 纠错预算是至多两处明显敲错，且不许改写已经通顺的本地整句。
+    #[test]
+    fn compose_prompt_sets_a_two_error_budget_and_names_every_local_reference() {
+        for needle in [
+            "letters",
+            "pinyin",
+            "local_candidates",
+            "local_sentence",
+            "before",
+            "after",
+            "至多两处",
+            "通顺",
+        ] {
+            assert!(SYSTEM_PROMPT.contains(needle), "系统提示缺少 {needle}");
+        }
+    }
+
+    /// 与本地首选相同的云端整句会被丢掉：可靠的本地候选不被云端结果覆盖。
+    #[test]
+    fn cloud_sentence_matching_the_local_first_is_dropped() {
+        let reply = r#"{"words": [], "sentence": "张涛"}"#;
+        assert_eq!(
+            parse_reply(reply, &request("zhang'tao", true)).sentence,
+            None
+        );
+        // 本地整句可能带着没修完的敲错：读得通的不同句子照常保留
+        let reply = r#"{"words": [], "sentence": "张涛怎么看"}"#;
+        assert_eq!(
+            parse_reply(reply, &request("zhang'tao", true))
+                .sentence
+                .as_deref(),
+            Some("张涛怎么看")
+        );
     }
 
     #[test]

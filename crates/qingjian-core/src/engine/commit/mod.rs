@@ -363,7 +363,7 @@ impl Engine {
             Some(c) => {
                 let alignment = self.align(&c.corrected, &candidate.syllables);
                 let mut typos = alignment.typos;
-                typos.extend(c.typo_pair(alignment.consumed));
+                typos.extend(c.typo_pairs(alignment.consumed));
                 typos
             }
             None => self.align(keys, &candidate.syllables).typos,
@@ -430,7 +430,6 @@ impl Engine {
         }
         let consumed = match self.active_correction(keys) {
             Some(c) => c
-                .edit
                 .to_original(self.align(&c.corrected, &candidate.syllables).consumed)
                 .min(keys.len()),
             None => self.align(keys, &candidate.syllables).consumed,

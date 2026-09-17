@@ -26,6 +26,14 @@ pub struct TypoCosts {
     /// 整段一处编辑的纠错代价：纠正后的整句得分要比原样转出的高出这么多才纠。
     /// 相当于「敲错一个键」的先验约 1/150；原样是合法简拼（`nhao` → 你好）时两边路径一样，纠正不会赢。
     pub correction_penalty: f64,
+
+    /// 双错联合纠错里第二处编辑的额外代价：连着敲错两处的先验远低于一处，
+    /// 第二处要在第一处的代价之外再多扣这么多。
+    pub second_correction_penalty: f64,
+
+    /// 双错纠错的采用门槛（nat）：扣完两次代价后还要比原样（或最好的单错）高出这么多才采用。
+    /// 单错只要求严格胜出，双错的改写面更大，门槛也更高，免得把说得通的句子改坏。
+    pub double_error_margin: f64,
 }
 
 impl TypoCosts {
@@ -37,6 +45,8 @@ impl TypoCosts {
         missing: 5.5,
         discount_cap: 3.0,
         correction_penalty: 5.0,
+        second_correction_penalty: 3.0,
+        double_error_margin: 2.0,
     };
 
     /// 这类敲错的基础代价。
@@ -57,6 +67,14 @@ impl TypoCosts {
     /// 整段一处编辑的纠错代价，按个人敲错表打折。
     pub fn correction_cost(&self, accepted: u32) -> f64 {
         self.discounted(self.correction_penalty, accepted)
+    }
+
+    /// 双错纠错的总代价：两处编辑各扣一次纠错代价（各自按个人敲错表打折），
+    /// 第二处再叠加 [`Self::second_correction_penalty`] 的额外惩罚。
+    pub fn double_correction_cost(&self, accepted_first: u32, accepted_second: u32) -> f64 {
+        self.correction_cost(accepted_first)
+            + self.correction_cost(accepted_second)
+            + self.second_correction_penalty
     }
 
     /// `base` 代价减去个人折扣：折扣 = min(ln(1 + 接受过的次数), [`Self::discount_cap`])。
