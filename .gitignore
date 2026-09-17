@@ -6,3 +6,5 @@
 /logs
 /data
 .playwright-mcp/
+.idea
+/tools/design/icon
