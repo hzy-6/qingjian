@@ -782,7 +782,7 @@ impl QingjianInputController {
         };
         host::with(|h| h.engine.accept_prediction(&text));
         tracing::debug!(%text, "接受整句补全");
-        client.insert_text(&text);
+        client.insert_text_replacing_marked(&text);
         self.refresh(client);
         true
     }

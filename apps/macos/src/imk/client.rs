@@ -45,6 +45,23 @@ impl<'a> TextClient<'a> {
         }
     }
 
+    /// 上屏并明确替换当前 marked text。
+    ///
+    /// 云端整句补全会先清空 Core 里的拼音缓冲；此时不能再依赖 IMK 对
+    /// `NO_REPLACEMENT` 的隐式处理，否则部分应用会把补全结果追加到原文后面。
+    pub fn insert_text_replacing_marked(&self, text: &str) {
+        let string = NSString::from_str(text);
+        let marked: NSRange = unsafe { msg_send![self.object, markedRange] };
+        let range = if marked.location == NSNotFound as usize {
+            NO_REPLACEMENT
+        } else {
+            marked
+        };
+        unsafe {
+            let _: () = msg_send![self.object, insertText: &*string, replacementRange: range];
+        }
+    }
+
     /// 应用里当前选中的文字与它的范围（翻译用）。没有选区、应用不支持读文本、超过 `max_chars` 个字符都返回 `None`。
     pub fn selected_text(&self, max_chars: usize) -> Option<(String, NSRange)> {
         let selected: NSRange = unsafe { msg_send![self.object, selectedRange] };
