@@ -13,7 +13,6 @@ body:
       label: 平台
       options:
         - macOS
-        - Windows
         - 与平台无关
     validations:
       required: true

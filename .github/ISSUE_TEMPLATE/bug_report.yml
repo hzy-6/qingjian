@@ -14,16 +14,14 @@ body:
       label: 平台
       options:
         - macOS
-        - Windows
-        - Linux
     validations:
       required: true
   - type: input
     id: os_version
     attributes:
       label: 系统版本
-      description: 例如 macOS 26.1、Windows 11 24H2、Windows 10 22H2
-      placeholder: Windows 11 24H2
+      description: 例如 macOS 26.1
+      placeholder: macOS 26.1
     validations:
       required: true
   - type: input
@@ -31,7 +29,7 @@ body:
     attributes:
       label: 青简版本
       description: 「设置 → 关于」页里的版本号，或下载的安装包文件名
-      placeholder: windows-v0.1.0-alpha.2
+      placeholder: macos-v0.1.2
     validations:
       required: true
   - type: input
@@ -79,6 +77,6 @@ body:
       label: 运行日志
       description: |
         先贴「设置 → 关于 → 复制诊断信息」的内容（版本、系统、配置，密钥会被抹去）。
-        日志文件：macOS 在「关于 → 打开日志目录」里取当天的；Windows 点「关于 → 打包日志到桌面」，把 zip 拖进来作为附件。
+        日志文件：在「关于 → 打开日志目录」里取当天的。
         目录位置见 https://qingjian.app/docs/help/data-and-logs 。缺省级别不含输入内容。
       render: text

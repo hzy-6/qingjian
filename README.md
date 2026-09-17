@@ -2,7 +2,7 @@
 
 > 输入的不只是文字。
 
-青简（Qingjian）是一个使用 **Rust** 开发的跨平台输入法。
+青简（Qingjian）是一个使用 **Rust** 开发的 macOS 输入法。
 
 https://github.com/user-attachments/assets/d145fde9-a641-4543-8b15-dd7a2685de3d
 
@@ -27,7 +27,7 @@ https://github.com/user-attachments/assets/d145fde9-a641-4543-8b15-dd7a2685de3d
 **一次只学习一种语言。** 青简不会在一个候选项旁边同时塞入英语、日语、韩语、德语。保持输入体验干净，比堆砌信息更重要。
 
 - 官网：[qingjian.app](https://qingjian.app)
-- 下载：[qingjian.app/download](https://qingjian.app/download)（macOS、Windows）
+- 下载：[qingjian.app/download](https://qingjian.app/download)（macOS）
 - 文档：[qingjian.app/docs](https://qingjian.app/docs)（安装、按键、设置、数据与隐私）
 - 反馈：[GitHub Issues](https://github.com/qingjian-team/qingjian/issues/new/choose)
 - QQ 群：[902314603](https://qm.qq.com/q/jBvn2gGTxm)（青简输入法用户内测体验交流群）
@@ -88,15 +88,9 @@ Learning Language: English
 
 ## 平台
 
-青简从一开始就按跨平台架构设计：核心输入引擎平台无关，各平台只负责接入系统输入接口与候选窗口。
+青简把核心输入引擎与 macOS 系统接入和候选窗口分开。
 
-```text
-macOS    → Input Method Kit (IMK)
-Windows  → Text Services Framework (TSF)
-Linux    → IBus / Fcitx
-```
-
-开发顺序是 macOS 优先；Windows 版已进入内测（TSF 文本服务 + 独立的输入引擎进程）。
+目前通过 Input Method Kit (IMK) 提供 macOS 版。
 
 ---
 

@@ -1,5 +1,5 @@
 //! 离线预览：`cargo run --release -p qingjian-render --example preview -- --out target/render-preview`
-//! 把样例帧按浅 / 深色、竖 / 横排画成 PNG，与各平台原生候选窗截图并排比；`--measure` 只量几段文字的宽度与原生对数；
+//! 把样例帧按浅 / 深色、竖 / 横排画成 PNG，与macOS 原生候选窗截图并排比；`--measure` 只量几段文字的宽度与原生对数；
 //! 末尾列出验收行每个字形落到了哪家字体。不是日常工具，改渲染器时拿来核对。
 
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use std::time::Instant;
 use clap::Parser;
 use qingjian_render::{
     FontLibrary, Frame, Layout, Preedit, PreeditSegment, PreeditStyle, Renderer, Row, Shadow,
-    StatusCell, Theme, Tone,
+    Theme, Tone,
 };
 
 #[derive(Parser)]
@@ -111,27 +111,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 path.display()
             );
         }
-    }
-
-    // Windows 的悬浮状态条：三格
-    let cells = [
-        StatusCell::text("中 · 小鹤", true),
-        StatusCell::text("，。", true),
-        StatusCell::Gear,
-    ];
-    for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
-        let status = renderer.render_status(&cells, &theme, args.scale, shadow.as_ref())?;
-        let path = args.out.join(format!("status-{theme_name}.png"));
-        status.rendered.pixmap.save_png(&path)?;
-        let (w, h) = status.rendered.content_size_points();
-        println!(
-            "{:<28} {:>4.0}×{:<4.0}pt  格边界 {:?}  {}",
-            format!("status-{theme_name}"),
-            w,
-            h,
-            status.cell_edges,
-            path.display()
-        );
     }
 
     for probe in [

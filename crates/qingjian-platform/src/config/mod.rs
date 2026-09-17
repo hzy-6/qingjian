@@ -9,7 +9,6 @@ mod model;
 mod modifiers;
 mod preedit_mode;
 mod shortcut;
-mod status_bar;
 mod theme_mode;
 
 use std::path::Path;
@@ -21,10 +20,7 @@ use toml_edit::DocumentMut;
 
 use crate::error::ConfigError;
 
-pub use apps::{
-    AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF, DEFAULT_ENGLISH_CANDIDATES_OFF_MACOS,
-    DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS,
-};
+pub use apps::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF, DEFAULT_ENGLISH_CANDIDATES_OFF_MACOS};
 pub use candidate_renderer::CandidateRenderer;
 pub use dictionaries::{DEFAULT_DOMAINS, DictionariesConfig};
 pub use general::{
@@ -37,13 +33,12 @@ pub use model::LocalModelConfig;
 pub use modifiers::Modifiers;
 pub use preedit_mode::PreeditMode;
 pub use shortcut::ShortcutConfig;
-pub use status_bar::StatusBarConfig;
 pub use theme_mode::ThemeMode;
 
-/// 用户配置文件（TOML）。所有平台同一份格式，缺省值全部在各分节的 `Default` 里。
+/// 用户配置文件（TOML）。缺省值全部在各分节的 `Default` 里。
 ///
 /// 配置文件是唯一事实源：菜单、设置窗口、手改文件三个入口都只写这个文件，再由壳热加载。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// 常规：学习语言、每页候选数、翻页键、外观。
@@ -68,9 +63,6 @@ pub struct Config {
     /// 云联想。
     pub predict: PredictConfig,
 
-    /// 悬浮状态条（桌面上常驻、可拖动的中 / 英浮窗）。
-    pub status_bar: StatusBarConfig,
-
     /// 本地整句模型。
     pub model: LocalModelConfig,
 }
@@ -85,7 +77,6 @@ fn deserialize_phrases<'de, D: serde::Deserializer<'de>>(
 
 /// 模板的 `[apps]` 一节（macOS）：应用按 bundle identifier 认。名单要与 [`DEFAULT_ENGLISH_CANDIDATES_OFF`] 一致，
 /// 测试 `template_parses_to_defaults` 会核对。用宏而不是常量，是因为 `concat!` 只收字面量。
-#[cfg(not(windows))]
 macro_rules! template_apps {
     () => {
         r#"[apps]
@@ -100,26 +91,7 @@ english_candidates_off = [
     };
 }
 
-/// 模板的 `[apps]` 一节（Windows）：应用按宿主进程的 exe 文件名认。名单要与 [`DEFAULT_ENGLISH_CANDIDATES_OFF`] 一致。
-#[cfg(windows)]
-macro_rules! template_apps {
-    () => {
-        r#"[apps]
-# 按应用改行为，条目是应用进程的 exe 文件名（`*` 结尾按前缀匹配）。Server 开着 debug 日志时每开一个会话会把 exe 名记进日志
-# 英文模式（Caps Lock）下不给候选的应用：终端与代码编辑器里候选窗口会挡住应用自己的补全，vim 里 Tab 和方向键也另有含义。设成 [] 就处处都给
-# 经典控制台（cmd / PowerShell）的窗口属于 conhost.exe，Windows Terminal 是 WindowsTerminal.exe
-english_candidates_off = [
-  "conhost.exe", "WindowsTerminal.exe", "alacritty.exe", "wezterm-gui.exe", "mintty.exe",
-  "Code.exe", "Code - Insiders.exe", "Cursor.exe", "zed.exe",
-  "idea64.exe", "pycharm64.exe", "clion64.exe", "rustrover64.exe", "goland64.exe", "rider64.exe", "webstorm64.exe", "phpstorm64.exe", "datagrip64.exe",
-  "devenv.exe", "sublime_text.exe", "notepad++.exe", "gvim.exe", "neovide.exe",
-]
-"#
-    };
-}
-
-/// 模板 `[shortcut]` 一节里的修饰键组合（macOS 命名）。缺省值两个平台一样，只是写法与注释按平台的键名。
-#[cfg(not(windows))]
+/// 模板 `[shortcut]` 一节里的修饰键组合（macOS 命名）。缺省使用 Option 键。
 macro_rules! template_shortcut_keys {
     () => {
         r#"# 数字键配这些修饰键上屏候选的译词：translation 第一个译词，translation_second 第二个（候选右侧有两个译词时）
@@ -135,24 +107,7 @@ delete_candidate = "shift"
     };
 }
 
-/// 模板 `[shortcut]` 一节里的修饰键组合（Windows 键名：alt / ctrl / win，读回来与 macOS 的 option / control / command 等价）。
-#[cfg(windows)]
-macro_rules! template_shortcut_keys {
-    () => {
-        r#"# 数字键配这些修饰键上屏候选的译词：translation 第一个译词，translation_second 第二个（候选右侧有两个译词时）
-# 任意修饰键组合（alt / shift / ctrl / win 用 + 连）。Alt+数字会被 Windows 当菜单快捷键截走，缺省用 Ctrl；组句时才拦，不打字时照常放行给应用
-translation = "ctrl"
-translation_second = "shift+ctrl"
-# 把应用里选中的文字译成学习语言（要开着云服务）：Windows 上还没接
-translate_selection = "ctrl+alt+t"
-# 数字键配这些修饰键删掉候选：用户词（云端选过的、自动造的）整个删掉，词库里的词清掉对它的学习记录。组句中要打感叹号先把词上屏
-delete_candidate = "shift"
-"#
-    };
-}
-
-/// 首次运行写出的模板：默认值全部列出并注释，用户改一处即可。`[shortcut]` 的修饰键与 `[apps]` 分平台，
-/// 见 [`template_shortcut_keys!`] / [`template_apps!`]。
+/// 首次运行写出的模板：默认值全部列出并注释，用户改一处即可。
 pub const TEMPLATE: &str = concat!(
     r#"# 青简输入法配置。保存后自动生效；也可以在菜单栏的输入法菜单里改。
 
@@ -167,7 +122,7 @@ page_keys = "[]"
 theme = "system"
 # 候选窗口排布：vertical 竖排 / horizontal 横排（横排只给高亮候选显示译文）
 layout = "vertical"
-# 候选窗口由谁绘制：qingjian 青简渲染器（各平台一致，主题走它）/ system 系统原生绘制（渲染器有问题时的退路）
+# 候选窗口由谁绘制：qingjian 青简渲染器（主题走它）/ system 系统原生绘制（渲染器有问题时的退路）
 renderer = "qingjian"
 # 候选窗口字体（字族名，如 "LXGW WenKai"）；空为系统字体。只对青简渲染器生效，没装这个字体时自动回到系统字体
 font = ""
@@ -178,12 +133,10 @@ english_candidates = true
 
 # 繁体输出模式。开启后上屏繁体，不影响词库和个人词频的简体记录。
 traditional = false
-# 中文模式下整段输入是英文词时（hello / key）是否让中文候选排第一、英文词第二；缺省 false：拼音不像话的输入英文词排第一
-chinese_first = false
-# 中文模式下（没在组句时）敲的标点转全角：, . ? ! : ; ( ) 等，数字后面的 . 保持半角。Windows 上悬浮状态条的「，。」格可以点着切；macOS 在偏好设置中选择默认中文标点模式
+# 中文模式下整段输入是英文词时（hello / key）是否让中文候选排第一、英文词第二；缺省 true
+chinese_first = true
+# 中文模式下（没在组句时）敲的标点转全角：, . ? ! : ; ( ) 等，数字后面的 . 保持半角；在偏好设置中选择默认中文标点模式
 full_width_punctuation = true
-# 英文模式下的同一件事，中英各记一份，状态条切的是当前模式那份；只有 Windows 用
-english_full_width_punctuation = false
 # 双拼方案：留空为全拼；xiaohe 小鹤 / ziranma 自然码 / microsoft 微软 / sogou 搜狗
 # 开着时 v / u / i 都是音节键，表达式模式没有入口，问字只能靠 question_mark 打开后用 ? 进；微软、搜狗方案的 ; 键是 ing
 shuangpin = ""
@@ -241,6 +194,8 @@ disabled = []
 [model]
 # 本地整句模型：随包的小模型在本机给整句候选重新排序，全程离线；停顿后几十毫秒生效。关掉只用词库统计
 enabled = true
+# 模型重排一条整句候选时分数最多挪动多少（nat）：调小重排更保守。不写（缺省）跟随模型文件自带的建议，再退引擎缺省 8
+# max_adjustment = 8.0
 
 [predict]
 # 云联想：把光标附近的文本发到下面的接口，让模型补全整句 / 联想下文。默认关闭。
@@ -265,14 +220,6 @@ slots = 2
 # 组句中除了词候选还要不要整句补全（preedit 右侧，Tab 接受）
 sentence = true
 
-[status_bar]
-# 桌面上常驻、可拖动的悬浮状态条（Windows）：「中 / 英」格点一下切换模式（开着双拼时还显示方案名）、「，。」格切全角 / 半角标点、齿轮打开设置。
-# 只在当前输入法是青简时显示；与任务栏的中 / 英指示器并存
-# 默认关；开着时可以拖到任意位置，拖到哪下次还在哪（拖动结束时把位置写进下面的 x / y，不用手填）
-enabled = false
-# 记住的屏幕位置（物理像素，拖动后自动写入）；留空则首次出现在屏幕右下角
-# x = 0
-# y = 0
 "#
 );
 
@@ -405,6 +352,39 @@ impl Config {
         }
         document[section][key] = toml_edit::value(value);
         // 写临时文件再改名：输入法进程随时可能被杀，不能留半个配置文件
+        qingjian_core::storage::write_atomic_str(path, &document.to_string()).map_err(|source| {
+            ConfigError::Write {
+                path: path.to_owned(),
+                source,
+            }
+        })
+    }
+
+    /// 原地删掉一个键（恢复缺省值，如「跟随模型」这类不写具体数值的缺省态），其余内容、注释与顺序原样保留。
+    /// 键本来就不在也是成功。
+    pub fn remove_value(path: &Path, section: &str, key: &str) -> Result<(), ConfigError> {
+        let source = match std::fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(());
+            }
+            Err(source) => {
+                return Err(ConfigError::Read {
+                    path: path.to_owned(),
+                    source,
+                });
+            }
+        };
+        let mut document: DocumentMut = source.parse().map_err(|source| ConfigError::Edit {
+            path: path.to_owned(),
+            source,
+        })?;
+        if let Some(table) = document
+            .get_mut(section)
+            .and_then(toml_edit::Item::as_table_mut)
+        {
+            table.remove(key);
+        }
         qingjian_core::storage::write_atomic_str(path, &document.to_string()).map_err(|source| {
             ConfigError::Write {
                 path: path.to_owned(),
@@ -579,5 +559,38 @@ mod tests {
         let path = std::env::temp_dir().join("qingjian-config-missing-test.toml");
         let _ = std::fs::remove_file(&path);
         assert_eq!(Config::load(&path).unwrap(), Config::default());
+    }
+
+    /// `[model] max_adjustment`：写了就带上，旧配置没有这个键时是 `None`（跟随模型建议）。
+    #[test]
+    fn model_section_parses_the_cap() {
+        let config: Config =
+            toml::from_str("[model]\nenabled = false\nmax_adjustment = 4.0\n").unwrap();
+        assert!(!config.model.enabled);
+        assert_eq!(config.model.max_adjustment, Some(4.0));
+        let old: Config = toml::from_str("[model]\nenabled = true\n").unwrap();
+        assert_eq!(old.model.max_adjustment, None);
+    }
+
+    /// 删掉键恢复缺省：注释与其他键原样保留，再删一次也不报错。
+    #[test]
+    fn remove_value_restores_the_default_and_keeps_comments() {
+        let path = std::env::temp_dir().join("qingjian-config-remove-value-test.toml");
+        std::fs::write(
+            &path,
+            "# 头注释\n[model]\n# 说明\nenabled = true\nmax_adjustment = 4.0\n",
+        )
+        .unwrap();
+        Config::remove_value(&path, "model", "max_adjustment").unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.starts_with("# 头注释\n[model]\n# 说明\nenabled = true\n"),
+            "{text}"
+        );
+        assert_eq!(Config::load(&path).unwrap().model.max_adjustment, None);
+        // 再删一次（键已不在）与删别的分节的键都不报错
+        Config::remove_value(&path, "model", "max_adjustment").unwrap();
+        Config::remove_value(&path, "predict", "enabled").unwrap();
+        let _ = std::fs::remove_file(&path);
     }
 }

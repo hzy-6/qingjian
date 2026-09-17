@@ -12,7 +12,6 @@ mod color;
 mod error;
 mod fonts;
 mod frame;
-mod gear;
 mod layout;
 mod renderer;
 mod shadow;
@@ -21,13 +20,10 @@ mod theme;
 
 pub use color::Color;
 pub use error::RenderError;
-/// Windows 的字体登记：按字族名找文件、列字族名（设置页用）。
-#[cfg(target_os = "windows")]
-pub use fonts::directwrite as system_fonts;
 pub use fonts::{FontLibrary, UiFont};
 pub use frame::{Frame, Preedit, PreeditSegment, PreeditStyle, Row, Tone};
 pub use layout::Layout;
-pub use renderer::{Rendered, RenderedStatus, Renderer, StatusCell};
+pub use renderer::{Rendered, Renderer};
 pub use shadow::Shadow;
 pub use theme::{FontSpec, Palette, Theme};
 

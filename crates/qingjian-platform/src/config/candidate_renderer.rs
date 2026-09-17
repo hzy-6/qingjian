@@ -11,7 +11,7 @@ pub enum CandidateRenderer {
     #[default]
     Qingjian,
 
-    /// 平台原生绘制（macOS AppKit / Windows GDI）。
+    /// 平台原生绘制（macOS AppKit）。
     System,
 }
 

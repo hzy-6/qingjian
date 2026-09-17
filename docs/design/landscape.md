@@ -1,29 +1,10 @@
 # 同类项目与数据源
 
-## 水杉输入法（MetasequoiaIME）
-
-- https://github.com/metasequoiaime/MetasequoiaImeTsf
-- Windows 专用，纯 TSF，自研引擎（非 Rime），GPL-3.0。截至 2026-09 约 950 star，近期新增 5000+ 用户。
-- 已经实现了「候选旁显示译文」：竖排候选窗中为候选项显示中文与**所选语种**的互译，每项最多两条简短释义；
-  本地词典优先，未命中可走腾讯云 TMT 或自建 DeepLX 兼容服务。
-- 另有日文罗马字输入模式、中英混输。
-- issue 里翻译功能相关的反馈占比不低（错译、想直接上屏译文、日语学习模式加罗马音、短语翻译不准），
-  说明用户在实际使用这个功能。
-
-对青简的意义：
-
-- 「打字时看到译文」这个交互形态已经被水杉验证，不需要再做原型验证。
-- 青简相对水杉的差异只剩三条：非 Windows 平台（水杉没有 macOS / Linux）、Rust 平台无关 Core、
-  更克制的单条 annotation（水杉最多两条，可走云端）。
-- 青简的输入法本体需要先达到「不比水杉差」这条线，翻译功能才有意义。
-- 水杉的 TSF 代码可以作为 Phase 5 的参考，但它是 GPL-3.0，除非青简也选 GPL，否则不能搬。
-- 水杉的进程结构（TSF DLL + 独立 Server 进程 + UI）是 Windows 平台层应采用的结构。
-
 ## Rime
 
 - https://rime.im/
-- librime（C++，约 5 万行）+ 各平台前端：Squirrel（macOS）、Weasel（Windows）、ibus-rime / fcitx-rime（Linux）。
-- 青简的「Core + 薄壳」架构与 Rime 相同，Rime 证明了这个结构能跑十几年。
+- librime（C++，约 5 万行）+ macOS 前端 Squirrel。
+- 青简的「Core + IMK 壳」结构借鉴了 Rime 的引擎与界面分离。
 - Rime 候选自带 comment 字段，Squirrel 显示在候选旁，配合 librime-lua 也能做出类似的译文标注。
 
 ## 数据源
@@ -44,7 +25,7 @@
 
 ## 许可策略
 
-- 代码：GPL-3.0-or-later（2026-09-07 定，此前测试阶段是「保留所有权利」）。选强 copyleft 是为了堵闭源抄走，与鼠须管 / 水杉一致；名字与 logo 不授权。
+- 代码：GPL-3.0-or-later（2026-09-07 定，此前测试阶段是「保留所有权利」）。选强 copyleft 是为了堵闭源抄走，与鼠须管一致；名字与 logo 不授权。
   `LICENSE`、「关于」页（`about.rs` 的 `LICENSE_NOTE`）、README 三处保持一致；pkg 里的 `license.txt` 从 `LICENSE` 拷。
 - 产品数据的源文件进 `assets/`（`assets/lexicon/` 词库源、`assets/emoji/`），带各自的许可证与署名文件；
   语料、Unihan 这类体积大或可重新下载的中间输入放仓库根目录 `data/`（gitignore），生成物在 `data/generated/`。
@@ -53,7 +34,7 @@
   CC BY 只需署名；CC BY-SA 的 share-alike 只约束数据本身及其修改版，不传染到代码，
   但对 CC-CEDICT 做的任何加工（裁剪、合并 gloss）都要以 CC BY-SA 发布。
 - 每新增一个数据源或依赖，同步更新上表和 README 的 License 一节。
-- GPL 项目（水杉、部分 Rime 前端）的代码只能读不能搬。
+- 第三方 GPL 项目的代码与数据引入前必须核对许可兼容性。
 
 ## 随包数据清单
 

@@ -27,10 +27,6 @@ pub struct ShortcutConfig {
 
 impl Default for ShortcutConfig {
     fn default() -> Self {
-        // Windows 上 Alt+数字被系统当菜单快捷键截走（TSF 收不到），译词键缺省用 Ctrl；macOS 用 Option。
-        #[cfg(windows)]
-        let (translation, translation_second) = (Modifiers::CONTROL, Modifiers::SHIFT_CONTROL);
-        #[cfg(not(windows))]
         let (translation, translation_second) = (Modifiers::OPTION, Modifiers::SHIFT_OPTION);
         Self {
             mode: ModeKeys::default(),
@@ -76,7 +72,7 @@ mod tests {
 
     #[test]
     fn old_files_without_modifier_keys_still_parse_and_get_defaults() {
-        // 缺省分平台（Windows 是 Ctrl 系，其余 Option 系），断言跟着平台的 Default 走
+        // 缺省为 Option 系，断言跟着平台的 Default 走
         let default = ShortcutConfig::default();
         let parsed: ShortcutConfig = toml::from_str("expression = \"i\"\n").unwrap();
         assert_eq!(parsed.mode.expression, 'i');

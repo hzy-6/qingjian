@@ -11,7 +11,7 @@ members = [
     "crates/qingjian-format",
     "crates/qingjian-neural",
     "crates/qingjian-render",
-    "apps/cli", "apps/macos", "apps/windows/server", "apps/windows/tsf", "apps/windows/settings", "tools/dict-convert", "tools/gloss-gen",
+    "apps/cli", "apps/macos", "tools/dict-convert", "tools/gloss-gen",
 ]
 
 [workspace.package]
@@ -81,10 +81,6 @@ objc2-input-method-kit = "0.3.2"
 # 候选窗字体设置：按字族名找字体文件（渲染器只加载指定文件）
 objc2-core-text = { version = "0.3.2", features = ["CTFont", "CTFontDescriptor"] }
 objc2-core-foundation = { version = "0.3.2", features = ["CFArray", "CFBase", "CFDictionary", "CFNumber", "CFSet", "CFString", "CFURL"] }
-
-# Windows 平台层
-embed-manifest = "1.4.0"
-windows-registry = "0.6.1"
 
 # cosmic-text 加了 opsz 光学字号支持（FontSystem::set_optical_size），补丁在 qingjian-team 的 fork，分支 qingjian-opsz 基于 0.19.0；
 # 上游收了就删掉这段回 crates.io。见 docs/design/rendering.md

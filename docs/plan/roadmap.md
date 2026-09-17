@@ -156,17 +156,6 @@
   `qingjian-translate::LevelTable` 读 `assets/levels/levels-{en,ja}.tsv`（`tools/corpus/levels.py` 生成），`VocabularyBook::with_levels`；等级不进候选窗口
 - [ ] 可选复习功能
 
-## Phase 5 — Cross-platform
-
-- [~] Windows TSF（`apps/windows/{server,tsf}`，真机自用中；细节见 `docs/design/architecture.md`「Windows：TSF」）
-  - [x] Server 进程 + TSF DLL 骨架、命名管道 IPC、多会话分派、端到端上屏
-  - [x] preedit 内联下划线、候选窗（词性 + 译文 + 分页 + 阴影）、云联想、失焦上屏、中英切换、设置界面、Inno 安装器
-  - [x] 候选窗渲染搬进 Server 进程 + `uiAccess` + 自签，覆盖微软商店 / 任务栏搜索等高 z-band 宿主
-  - [ ] 发版：Certum 开源代码签名证书、`windows-v<版本>` 标签与 CI
-- [ ] Linux IBus / Fcitx
-- [ ] 配置同步
-- [ ] 跨平台词库
-
 ## Phase 6 — 云联想
 
 Core 定义 `Predictor` trait（与 `Translator` / `Learner` 同一模式），网络实现放独立 crate `qingjian-predict`，
@@ -214,7 +203,7 @@ Core 永远不联网。第一个实现接 DeepSeek（OpenAI 兼容接口），�
 - [x] 进壳（2026-09-08 晚）：前文 KV 缓存（64 字前文 × 8 条 133 → 28 ms）、Core `engine/rescoring` 异步重排（后台线程 + 文本分数缓存，壳停键 80 ms 请求）、
   应用光标前文当前文、λ 缺省 0.5、`[model] enabled` 开关与「云服务」页勾选、模型随包放 `Resources/model/`；TextEdit 端到端 候选声称 → 候选生成
 - [x] 模型单文件 `.qjm`（2026-09-12）：`.qj` 容器新种类 `Kind::Model`，三节原样装三件套；`find_model` 先 `.qjm` 再目录；`pack model` / `tools/release/pack-model.sh`；
-  data Release 上传 `model.qjm`，mac `Resources/model/` 与 Windows `data\model` 只带这一个文件
+  data Release 上传 `model.qjm`，mac `Resources/model/` 只带这一个文件
 - [ ] 本地模型后续：个人微调（闲时训练）；权重许可已定与代码一致 GPL-3.0-or-later（2026-09-12，写在 `pack-model.sh`）
 - [ ] 闲时训练：门禁包括接电源、温度、空闲时长；训练数据来自本地输入历史；模型与数据都可一键清除
 - [ ] 评测门槛：留出用户文本上比 n-gram 的困惑度与 top-1 命中率，赢了才默认启用；每次按键推理延迟有上限

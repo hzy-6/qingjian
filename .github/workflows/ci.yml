@@ -1,5 +1,4 @@
-# 三个 job：Linux 跑 fmt / clippy / 全 workspace 测试（排除 IMK 外壳）；macOS 与 Windows runner 各编各的壳并跑平台测试，
-# 平台特有的编译错（Objective-C 调用、TSF 导出、WinUI）在 PR 里就暴露，不等发版。仓库公开，Actions 不计费。
+# Linux 跑核心 crate 的 fmt / clippy / 测试；macOS 编译并测试 IMK 壳。
 # actions 一律钉到 commit（注释里是对应的标签），Dependabot 每周提 PR 更新；cargo 全加 --locked，Cargo.lock 没提交就报错。
 name: ci
 
@@ -61,31 +60,3 @@ jobs:
 
       - name: Test (IMK shell)
         run: cargo test -p qingjian-macos --locked
-
-  windows:
-    runs-on: windows-latest
-    env:
-      # Server 的 build.rs 嵌 uiAccess manifest，没签名的 exe（含测试二进制）起不来（os error 740）；与 release.yml 一样关掉
-      QINGJIAN_UIACCESS: '0'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
-        with:
-          toolchain: 1.96.0
-          components: clippy
-          targets: i686-pc-windows-msvc
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Clippy (Server, TSF DLL, Settings)
-        run: cargo clippy -p qingjian-windows-server -p qingjian-windows-tsf -p qingjian-windows-settings --all-targets --locked -- -D warnings
-
-      - name: Test (Server, TSF DLL, Settings)
-        run: cargo test -p qingjian-windows-server -p qingjian-windows-tsf -p qingjian-windows-settings --locked
-
-      # 安装包另带一份 32 位 DLL（企业微信 / WPS 这类 32 位应用只能加载它）
-      - name: Check (TSF DLL, 32-bit)
-        run: cargo check -p qingjian-windows-tsf --target i686-pc-windows-msvc --locked

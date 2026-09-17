@@ -50,16 +50,12 @@ pub struct GeneralConfig {
 
     /// 繁体输出模式。
     pub traditional: bool,
-    /// 中文模式下中英混输时中文候选总排在英文词前面。缺省关：拼音不像话的输入（`hello`）英文词排第一，
-    /// 常在中文模式里打英文词的人不受影响；想要中文永远在前的自己打开。
+    /// 中文模式下中英混输时中文候选总排在英文词前面。缺省开；常在中文模式里打英文词的人可以关闭。
     pub chinese_first: bool,
 
     /// 中文模式下不在组句时敲的标点转成全角（`，。？！` 等，数字后的 `.` 保持半角）。
-    /// Windows 悬浮状态条上可点切换；macOS 在偏好设置中选择默认模式。
+    /// 在偏好设置中选择默认模式。
     pub full_width_punctuation: bool,
-
-    /// 英文模式下的同一件事，中英各记一份；缺省半角。只有 Windows 用（macOS 英文模式一律半角）。
-    pub english_full_width_punctuation: bool,
 
     /// 双拼方案：空串为全拼，否则 `xiaohe` / `ziranma` / `microsoft` / `sogou`（见 [`ShuangpinScheme`]）。
     pub shuangpin: String,
@@ -94,9 +90,8 @@ impl Default for GeneralConfig {
             preedit: PreeditMode::default(),
             english_candidates: true,
             traditional: false,
-            chinese_first: false,
+            chinese_first: true,
             full_width_punctuation: true,
-            english_full_width_punctuation: false,
             shuangpin: String::new(),
             zhuyin: false,
             log_level: LogLevel::default(),

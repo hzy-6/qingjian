@@ -49,13 +49,9 @@ computer
 ## 技术选型
 
 候选窗口本质上只有四个原语：若干行 (序号, 候选词, 译文)、一行高亮、跟随光标定位、异步补画译文。
-这么小的 UI 不值得引入跨平台 GUI 框架。缺省由一个 Rust 自绘渲染器出位图、各平台只贴图（主题因此像素级一致），见 [rendering.md](rendering.md)；下表是各平台窗口与退路的画法。
+这么小的 UI 不值得引入跨平台 GUI 框架。缺省由一个 Rust 自绘渲染器出位图、macOS 壳贴图，见 [rendering.md](rendering.md)。
 
-| 平台 | 方案 | 理由 |
-|---|---|---|
-| macOS | `objc2-app-kit`：非激活的 NSPanel + 自定义 NSView，用 NSAttributedString / Core Text 画行 | Squirrel 同款做法。窗口必须不抢焦点、浮在所有应用之上、瞬间出现，只有 AppKit 能稳定满足 |
-| Windows | Server 进程里 GDI 画到 layered window（`server/src/ui/layered/`） | 避开 WebView2 依赖（水杉 issue #68 就是安装环境缺 WebView2）。原计划改 Direct2D + DirectWrite，已被自绘渲染器取代 |
-| Linux | 自绘窗口（wayland-client / x11rb），不用 IBus / Fcitx 自带面板 | IBus 的 lookup table 没有 comment 字段，Fcitx5 有但样式受面板限制。kime 走的也是自绘 |
+macOS 使用非激活 NSPanel 显示候选窗；缺省由 `qingjian-render` 绘制位图，AppKit 绘制作为过渡期退路。窗口不能抢焦点，必须能在全屏应用上方及时显示。
 
 macOS 面板的层级与 Space：层级 `kCGPopUpMenuWindowLevel`（101，与系统候选框同级；不能 `setFloatingPanel`，它会把层级改回 3，全屏应用里就看不见），
 collection behavior 是 CanJoinAllSpaces + FullScreenAuxiliary + Stationary。但 macOS 26 上 WindowServer 只把面板绑到它**创建时已有**的 Space：
@@ -290,12 +286,9 @@ Core 按 `prediction::restates_question` 剔掉：与本地转出的问题相同
 （版本、系统、加载的数据、抹掉密钥的配置原文、日志目录，写进剪贴板）。
 日志缺省 info 级，不含用户敲的内容；`[general] log_level = "debug"`（「高级」页「详细日志」）才逐键记，`tracing_subscriber::reload` 热切换，`RUST_LOG` 环境变量在时以它为准。
 
-### 中英切换（两个系统的习惯不同）
+### 中英切换
 
-| 系统 | 切中英 | 英文模式 |
-|---|---|---|
-| macOS | Caps Lock 位置的中/英键。系统层面它切的是 Caps Lock 状态，我们把「Caps Lock 亮着」当作英文模式 | 默认小写，按住 Shift 大写；标点不转全角。macOS 上 Caps Lock 亮着时按不按 Shift 送来的都是大写，所以按键时读一次 Shift 的硬件状态（`NSEvent.modifierFlags`）决定大小写 |
-| Windows（Phase 5） | Shift 单击切中英；Caps Lock 是真正的大小写锁定 | 默认小写，按住 Shift 大写 |
+macOS 使用 Caps Lock 状态作为中英模式：亮起为英文，默认小写；按住 Shift 输出大写。按键时读取 `NSEvent.modifierFlags` 判断 Shift 硬件状态。
 
 macOS 上如果系统开了「使用大写锁定键切换 ABC 输入法」，按键会直接切到 ABC 输入源，我们收到 deactivate、
 收窗即可，两条路都能得到小写英文。

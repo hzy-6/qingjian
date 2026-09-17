@@ -31,7 +31,7 @@
 1. 將 `ferrous-opencc` 作為 `qingjian-core` 的一個可選依賴或內建功能。
 2. 在 `GeneralConfig` 增加 `traditional: bool` 的設定選項。
 3. 在 Core 的候選詞結果輸出前，若該選項為 `true`，則進行簡轉繁。
-**優點**：架構改動最小，跨平台（Windows / macOS / CLI）共享一致的轉換邏輯，完全滿足官方維護者的期望。
+**優點**：架構改動最小，macOS 與 CLI 共享一致的轉換邏輯，完全滿足官方維護者的期望。
 
 ### 軌道二：替換原生台灣繁體詞庫 (Native zh-TW Dictionary)
 **目標客群**：真正的台灣大千注音使用者，需要精確的台灣讀音與在地詞彙。

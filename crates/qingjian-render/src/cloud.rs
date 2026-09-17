@@ -1,5 +1,5 @@
 //! 云联想的小云朵：两个圆拱加一条圆角底边的并集，只描边不填充，对应 macOS 的 SF Symbol `cloud`（18×13 挤进 13×13 方块）
-//! 与 Windows 的 ☁ 字形。
+//! 用于云端候选标记。
 
 use tiny_skia::{BlendMode, PathBuilder, Pixmap, Rect};
 

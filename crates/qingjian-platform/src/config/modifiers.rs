@@ -42,7 +42,7 @@ impl Modifiers {
         command: false,
     };
 
-    /// ⌃ / Ctrl。Windows 上译词键的缺省（Alt 会被系统菜单截走）。
+    /// ⌃ / Ctrl。可用于自定义快捷键。
     pub const CONTROL: Self = Self {
         option: false,
         shift: false,

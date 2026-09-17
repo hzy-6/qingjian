@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 把训练仓库导出到 data/model/ 的三件套（model.safetensors / config.json / vocab.json）打成一个 data/model/model.qjm。
-# 随包只带这一个文件（mac Resources/model/、Windows {app}\data\model、data Release）；三件套留在目录里给开发直接加载。
+# 随包只带这一个文件（mac Resources/model/、data Release）；三件套留在目录里给开发直接加载。
 # 元数据（名称 / 许可 / 署名）只写在这里，bundle.sh 与 data-bundle.sh 见三件套比 .qjm 新就调它重打。
 #
 #   tools/release/pack-model.sh            # 三件套比 .qjm 新（或没有 .qjm）才重打

@@ -14,8 +14,6 @@ body:
       multiple: true
       options:
         - macOS
-        - Windows
-        - Linux
         - 全部平台
     validations:
       required: true

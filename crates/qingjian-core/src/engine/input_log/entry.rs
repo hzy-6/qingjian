@@ -43,7 +43,7 @@ pub struct CommitEntry {
     #[serde(default)]
     pub rescored: bool,
 
-    /// 正在输入的应用（macOS bundle identifier / Windows exe 名）；壳没给为 `None`。
+    /// 正在输入的应用（macOS bundle identifier）；壳没给为 `None`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
 
@@ -83,7 +83,7 @@ pub enum InputLogEntry {
         /// 输入法版本号。
         version: String,
 
-        /// 平台（`macos` / `windows` / `cli`）。
+        /// 平台（`macos` / `cli`）。
         platform: String,
 
         /// 本地整句模型（神经重打分）开没开。
