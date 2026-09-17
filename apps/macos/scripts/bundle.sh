@@ -63,6 +63,7 @@ BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
   -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
 # 卸载脚本随包，装了 pkg 的用户从 Resources 里运行
 cp apps/macos/scripts/uninstall.sh "$APP/Contents/Resources/uninstall.sh"
+cp apps/macos/scripts/activate-after-install.sh "$APP/Contents/Resources/activate-after-install.sh"
 # 输入源名字按系统语言本地化（中文系统显示「青简」，其他显示 Qingjian）
 cp -R apps/macos/resources/*.lproj "$APP/Contents/Resources/"
 # 词库与释义表打进 Resources。data/generated/ 里有生成好的产品数据（自建词库 + 语言模型 + LLM 释义表）就用它，

@@ -65,43 +65,51 @@ pub fn register_main_bundle() -> Result<bool, String> {
 
 /// 注册 `app`，启用 ID 为 `source_id` 的输入源并切成当前。
 ///
-/// 两个坑：刚换过 bundle 的头几秒系统还在重新扫描新包，这时启用的记录会被换掉、状态跟着丢（实测装完 3 秒内都这样）；
-/// TIS 在进程内缓存输入源状态，本进程怎么重列表、跑 run loop 回读都是旧值，只有新起的进程看得到真实状态。
-/// 所以每一轮都：注册 → 启用 → 起一个子进程（本程序带 `--finish-register`）在干净的缓存里回读并切成当前 →
-/// 隔 [`CONFIRM`] 再起一次子进程确认没被重扫顶掉（顶掉了就整轮重来）；子进程说没启用就等 [`RETRY_INTERVAL`] 再来，最多等 [`ENABLE_TIMEOUT`]。
+/// 安装器在 PackageKit 最后登记 bundle 后才调用这里，避免新包扫描覆盖刚启用的记录。
+/// TIS 在进程内缓存输入源状态，因此起子进程（本程序带 `--finish-register`）回读并切成当前，
+/// 隔 [`CONFIRM`] 再确认一次。启用请求只发一次：系统可能弹出用户授权框，反复请求会反复弹框。
 /// 返回是否也切成了当前输入源（切换失败不算错，用户还能从菜单里挑）。
 pub fn register_and_enable(app: &Path, source_id: &str) -> Result<bool, String> {
     let url =
         CFURL::from_file_path(app).ok_or_else(|| format!("路径无法转成 URL：{}", app.display()))?;
     let exe = std::env::current_exe().map_err(|e| format!("找不到自己的可执行文件：{e}"))?;
+    // SAFETY: url 是有效的 CFURL，函数只读它。
+    let status = unsafe { TISRegisterInputSource(CFRetained::as_ptr(&url)) };
+    if status != 0 {
+        return Err(format!("TISRegisterInputSource 失败（{status}）"));
+    }
     let started = std::time::Instant::now();
-    loop {
-        // SAFETY: url 是有效的 CFURL，函数只读它。
-        let status = unsafe { TISRegisterInputSource(CFRetained::as_ptr(&url)) };
-        if status != 0 {
-            return Err(format!("TISRegisterInputSource 失败（{status}）"));
-        }
+    let sources = loop {
         if let Some(sources) = list_sources(source_id).filter(|s| s.count() > 0) {
-            for_each_source(&sources, |source| {
-                // SAFETY: source 来自还活着的数组。
-                let status = unsafe { TISEnableInputSource(source) };
-                if status == 0 {
-                    Ok(())
-                } else {
-                    Err(format!("TISEnableInputSource 失败（{status}）"))
-                }
-            })?;
-            std::thread::sleep(SETTLE);
-            let first = finish_in_child(&exe, source_id)?;
-            if first != FINISH_NOT_ENABLED {
-                std::thread::sleep(CONFIRM);
-                let second = finish_in_child(&exe, source_id)?;
-                match second {
-                    FINISH_SELECTED => return Ok(true),
-                    FINISH_ENABLED_ONLY => return Ok(false),
-                    _ => eprintln!("输入源启用后又被系统重扫顶掉，重来"),
-                }
-            }
+            break sources;
+        }
+        if started.elapsed() > ENABLE_TIMEOUT {
+            return Err(format!("找不到输入源：{source_id}"));
+        }
+        std::thread::sleep(RETRY_INTERVAL);
+    };
+    for_each_source(&sources, |source| {
+        if is_enabled(source) {
+            return Ok(());
+        }
+        // SAFETY: source 来自还活着的数组。未启用时仅请求一次，等用户在系统弹框里决定。
+        let status = unsafe { TISEnableInputSource(source) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(format!("TISEnableInputSource 失败（{status}）"))
+        }
+    })?;
+    std::thread::sleep(SETTLE);
+    loop {
+        let first = finish_in_child(&exe, source_id)?;
+        if first != FINISH_NOT_ENABLED {
+            std::thread::sleep(CONFIRM);
+            return match finish_in_child(&exe, source_id)? {
+                FINISH_SELECTED => Ok(true),
+                FINISH_ENABLED_ONLY => Ok(false),
+                _ => Err(format!("输入源启用后失效：{source_id}")),
+            };
         }
         if started.elapsed() > ENABLE_TIMEOUT {
             return Err(format!(
