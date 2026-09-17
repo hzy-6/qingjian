@@ -71,6 +71,9 @@ impl Host {
         if force || config.dictionaries != self.applied_dictionaries {
             self.reload_dictionaries();
         }
+        // 模型重排的幅度上限（`None` 跟随模型文件建议）：模型没加载完也先记着，接上就生效
+        self.engine
+            .set_neural_max_adjustment(config.model.max_adjustment);
         if self.applied_model.as_ref() != Some(&config.model) {
             if config.model.enabled {
                 self.load_local_model();

@@ -13,6 +13,18 @@ fn partial_last_syllable_expands() {
 }
 
 #[test]
+fn sentence_completes_single_letter_after_two_syllables_without_whole_word() {
+    let dictionary = Dictionary::parse(
+        "你好\tni hao\t9000\n你\tni\t90000\n好\thao\t80000\n吗\tma\t70000\n么\tme\t100\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("nihaom");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "你好吗");
+}
+
+#[test]
 fn initials_match_abbreviated_words_and_commit_consumes_letters() {
     let all = texts("kf");
     assert_eq!(all[0], "开放"); // 同为简拼命中，按词频
@@ -219,9 +231,9 @@ fn sentence_conversion_leads_when_input_spans_several_words() {
     assert_eq!(all[0], "开发");
     assert_eq!(all.iter().filter(|t| *t == "开发").count(), 1);
 
-    // 末尾只有一个字母时整句不算它：xiangkaif → 想开
+    // 末尾只有一个字母时也参与整句：xiangkaif → 想开放
     let all = texts("xiangkaif");
-    assert_eq!(all[0], "想开");
+    assert_eq!(all[0], "想开放");
 }
 
 #[test]

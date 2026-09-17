@@ -13,6 +13,11 @@ description: 随包的小模型在本机给整句候选重新排序：怎么生�
 
 模型只影响整句候选那一条，词候选、你选过的词、自动造的词都不受它影响；你的习惯仍然优先。
 
+## 重排的幅度
+
+「偏好设置 → 云服务」的「模型修正上限」控制模型一次最多把一条整句候选挪多少分：调小更保守（重排幅度受限），调大更信模型。
+缺省「跟随模型」用模型文件自带的建议；配置文件 `[model]` 里写 `max_adjustment = 4.0`（数字）或删掉这行（跟随模型）也可以。
+
 ## 什么时候不生效
 
 - 已经翻到后面的页或用方向键移过高亮时，模型的结果不再换掉正在看的这页。
@@ -21,11 +26,10 @@ description: 随包的小模型在本机给整句候选重新排序：怎么生�
 
 ## 关掉
 
-「偏好设置 → 云服务」（Windows：「设置 → 云服务」）关闭「本地整句模型」，或配置文件 `[model]` 里 `enabled = false`。关闭后只用词库统计，与云联想互不影响。
+「偏好设置 → 云服务」关闭「本地整句模型」，或配置文件 `[model]` 里 `enabled = false`。关闭后只用词库统计，与云联想互不影响。
 
 ## 自己的模型
 
 把 `.qjm` 模型文件放进用户数据目录的 `model/` 下，重启输入法后优先使用（训练仓库直接导出的 `model.safetensors`、`config.json`、`vocab.json` 三个文件放进去也认；两者都有时用 `.qjm`）：
 
-- **macOS**：`~/Library/Application Support/Qingjian/model/`
-- **Windows**：`%APPDATA%\Qingjian\model\`
+`~/Library/Application Support/Qingjian/model/`

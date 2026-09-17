@@ -21,6 +21,11 @@ pub struct ModelConfig {
 
     /// 最长上下文（token 数），位置嵌入的行数。
     pub context: usize,
+
+    /// 训练侧建议的单条路径最大神经修正（nat）：模型自带「该被信多少」，Engine 在用户没配置时用它。
+    /// 旧模型没有这个字段，缺省 `None`（用 Core 的缺省上限），加载不因缺字段失败。
+    #[serde(default)]
+    pub max_adjustment: Option<f64>,
 }
 
 impl ModelConfig {
@@ -30,5 +35,29 @@ impl ModelConfig {
             path: path.to_owned(),
             source,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal() -> String {
+        r#"{"vocab_size": 100, "n_layer": 2, "n_embd": 32, "n_head": 4, "context": 128}"#.to_owned()
+    }
+
+    /// 旧模型的 config.json 没有修正建议字段：加载成功，用 `None`（Core 的缺省上限）。
+    #[test]
+    fn parses_without_the_suggested_cap() {
+        let cfg = ModelConfig::from_json(&minimal(), Path::new("config.json")).unwrap();
+        assert_eq!(cfg.max_adjustment, None);
+        assert_eq!(cfg.context, 128);
+    }
+
+    #[test]
+    fn parses_the_suggested_cap() {
+        let text = minimal().replace('}', ", \"max_adjustment\": 2.5}");
+        let cfg = ModelConfig::from_json(&text, Path::new("config.json")).unwrap();
+        assert_eq!(cfg.max_adjustment, Some(2.5));
     }
 }

@@ -105,6 +105,21 @@ impl Settings {
         true
     }
 
+    /// 原地删掉一个键（恢复缺省）并重读，见 [`Self::set_value`]。
+    pub fn remove_value(&mut self, section: &str, key: &str) -> bool {
+        let Some(path) = self.path.clone() else {
+            tracing::warn!("没有配置文件路径，设置不落盘");
+            return false;
+        };
+        if let Err(error) = Config::remove_value(&path, section, key) {
+            tracing::warn!(%error, section, key, "写配置失败");
+            return false;
+        }
+        tracing::info!(section, key, "配置键已删，恢复缺省");
+        self.read(&path);
+        true
+    }
+
     /// 把一个环境变量（密钥）写进配置同目录的 `.env` 并立即注入当前进程。
     /// 文件仅本用户可读；值不进日志。返回是否成功。
     pub fn set_env_var(&self, name: &str, value: &str) -> bool {

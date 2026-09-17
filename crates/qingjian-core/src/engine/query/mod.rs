@@ -253,7 +253,7 @@ impl Engine {
                 translation: None,
             })
             .collect();
-        // 中文优先：整句先进去占第一，英文词紧跟其后（第二）；关掉时英文词先进、整句排在开头的英文后面
+        // 中文优先时整句先放入，英文紧跟其后；关闭时保留英文词频和学习排序。
         if self.chinese_first {
             self.insert_sentence(
                 &mut items,

@@ -97,6 +97,10 @@ pub struct Args {
     #[arg(long)]
     pub neural_context: Option<usize>,
 
+    /// 神经重打分单条路径的最大修正（nat，缺省 8）：神经分与静态分差距再大也只挪这么多；模型文件自带建议时缺省跟随它
+    #[arg(long)]
+    pub neural_max_adjustment: Option<f64>,
+
     /// 神经重打分走后台线程（输入法壳里的接法）：查询先按词级模型出候选，再请求 / 等待重打分后重查一次；结果应与同步一致
     #[arg(long)]
     pub neural_async: bool,

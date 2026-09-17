@@ -14,6 +14,10 @@ const DICTIONARY_ENABLED_TAG_BASE: NSInteger = 200;
 /// 附加词库「移除」按钮的 tag 起点。
 const DICTIONARY_REMOVE_TAG_BASE: NSInteger = 300;
 
+/// `[model] max_adjustment` 弹出菜单的档位：`None` 是「跟随模型」（缺省），其余按 nat 数值升序；
+/// 与云服务页的菜单标题一一对应。
+pub const MODEL_CAPS: [Option<f64>; 4] = [None, Some(2.0), Some(4.0), Some(8.0)];
+
 /// 一页最多列多少本附加词库（tag 段的宽度）。
 pub const MAX_DICTIONARIES: usize = 100;
 
@@ -55,6 +59,9 @@ pub enum Setting {
 
     /// `[model] enabled`。
     LocalModelEnabled,
+
+    /// `[model] max_adjustment`，弹出菜单，档位见 [`MODEL_CAPS`]。
+    LocalModelCap,
 
     /// 默认中文标点模式。
     FullWidthPunctuation,
@@ -210,6 +217,7 @@ impl Setting {
             Self::OpenWebsite => 30,
             Self::OpenRepository => 31,
             Self::LocalModelEnabled => 32,
+            Self::LocalModelCap => 48,
             Self::FullWidthPunctuation => 33,
             Self::SelectPhrase => 34,
             Self::PhraseDraft => 35,
@@ -267,6 +275,7 @@ impl Setting {
             30 => Self::OpenWebsite,
             31 => Self::OpenRepository,
             32 => Self::LocalModelEnabled,
+            48 => Self::LocalModelCap,
             33 => Self::FullWidthPunctuation,
             34 => Self::SelectPhrase,
             35 => Self::PhraseDraft,
@@ -309,6 +318,7 @@ mod tests {
             Setting::QuestionKey,
             Setting::CloudEnabled,
             Setting::LocalModelEnabled,
+            Setting::LocalModelCap,
             Setting::BaseUrl,
             Setting::Model,
             Setting::ApiKey,

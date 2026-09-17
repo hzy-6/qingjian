@@ -48,7 +48,7 @@ struct Node {
 /// （调用方保证它与词库、`weight`、`personal`、`cost` 一致，这些一变就清）。
 ///
 /// 简拼位置（`w x q`）按前缀取词：每个格子的候选会多得多，由语言模型在路径上分辨。
-/// 全拼句子末尾的前缀太短时不算它（多半是没打完的音节）；前面已有简拼的句子里末尾单字母就是一个音节。
+/// 全拼句子只有一个完整音节时，末尾单字母先不参与整句；已有两个完整音节时让模型判断这个前缀。
 pub fn convert(
     dictionaries: &[&Dictionary],
     positions: &[Vec<SyllablePattern<'_>>],
@@ -143,6 +143,7 @@ pub fn convert_paths(
     let positions = if keep_partial
         || last.complete
         || abbreviated_head
+        || head.len() >= 2
         || last.text.len() >= MIN_PARTIAL_LETTERS
     {
         positions
@@ -470,10 +471,10 @@ mod tests {
         let mut patterns = complete(&["wo", "xiang"]);
         patterns.push(vec![SyllablePattern::prefix("ka")]);
         assert_eq!(unigram(&dictionary, &patterns).unwrap().text, "我想开");
-        // 全拼句子末尾的单字母多半是没打完的音节，不参与
+        // 两个完整音节后，末尾单字母也参与组句
         let mut patterns = complete(&["wo", "xiang"]);
         patterns.push(vec![SyllablePattern::prefix("k")]);
-        assert_eq!(unigram(&dictionary, &patterns).unwrap().text, "我想");
+        assert_eq!(unigram(&dictionary, &patterns).unwrap().text, "我想开");
     }
 
     fn abbreviated<'a>(letters: &[&'a str]) -> Vec<Vec<SyllablePattern<'a>>> {

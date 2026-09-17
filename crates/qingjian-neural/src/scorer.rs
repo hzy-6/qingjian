@@ -19,6 +19,10 @@ pub struct CharScorer {
 
     /// 最近一段前文的 K / V 缓存（前文 token 与缓存）：一次组句里前文不变，候选换了只算候选。
     cache: Mutex<Option<(Vec<u32>, PrefixCache)>>,
+
+    /// 测试用：`score` 真实执行的打分次数（一次一批前向），验证空后文快速路径没多做推理。
+    #[cfg(test)]
+    score_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl CharScorer {
@@ -90,12 +94,23 @@ impl CharScorer {
             vocab,
             metadata,
             cache: Mutex::new(None),
+            #[cfg(test)]
+            score_calls: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
     /// `.qjm` 带的元数据（名称 / 许可证 / 署名 / 参数量）；三件套目录加载的没有。
     pub fn metadata(&self) -> Option<&Metadata> {
         self.metadata.as_ref()
+    }
+
+    /// `config.json` 里模型自带的修正建议（nat）：训练侧声明「该被信多少」，Core 在用户没配置时用它；
+    /// 旧模型没有这个字段（`None`，用 Core 的缺省上限），非法值也当没有。
+    pub(crate) fn suggested_max_adjustment(&self) -> Option<f64> {
+        self.model
+            .config()
+            .max_adjustment
+            .filter(|cap| cap.is_finite() && *cap >= 0.0)
     }
 
     pub fn vocab(&self) -> &Vocab {
@@ -110,6 +125,9 @@ impl CharScorer {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
+        #[cfg(test)]
+        self.score_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let limit = self.model.config().context;
         let full: Vec<u32> = std::iter::once(EOS)
             .chain(self.vocab.encode(context))
@@ -157,6 +175,40 @@ impl CharScorer {
             .map(|(tail, row)| row[..tail.len()].iter().map(|&v| f64::from(v)).sum())
             .collect())
     }
+
+    /// 使用光标后文做双向一致性补分。
+    /// 正向分仍是主要分数；右文项比较“候选+右文”与“右文”在同一前文下的增量。
+    /// 后文为空时走快速路径：只算一次正向分（等价于直接 [`Self::score`]），不为右文项多做任何推理。
+    pub fn score_with_after(
+        &self,
+        before: &str,
+        after: &str,
+        texts: &[&str],
+    ) -> Result<Vec<f64>, NeuralError> {
+        let forward = self.score(before, texts)?;
+        if after.is_empty() || texts.is_empty() {
+            return Ok(forward);
+        }
+        let baseline = self
+            .score(before, &[after])?
+            .into_iter()
+            .next()
+            .unwrap_or(0.0);
+        let joined: Vec<String> = texts.iter().map(|text| format!("{text}{after}")).collect();
+        let joined_refs: Vec<&str> = joined.iter().map(String::as_str).collect();
+        let joint = self.score(before, &joined_refs)?;
+        Ok(forward
+            .into_iter()
+            .zip(joint)
+            .map(|(base, combined)| base + 0.25 * (combined - baseline))
+            .collect())
+    }
+
+    /// 测试用：`score` 真实执行了几次（一次一批前向）。
+    #[cfg(test)]
+    fn score_calls(&self) -> usize {
+        self.score_calls.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 /// 权重与中间量的精度：Metal 上缺省 f16（与 f32 打分一致，显存减一半、略快），CPU 上 f32（candle 的 CPU f16 矩阵乘慢）；
@@ -184,7 +236,13 @@ fn default_device() -> Result<Device, NeuralError> {
 mod tests {
     use super::*;
 
-    /// 随包模型的三件套（训练仓库导出到 `data/model/`）；没有就跳过这些测试。
+    /// 随包 / 训练仓库导出的模型（`data/model` 下的 `.qjm` 或三件套）；没有就跳过这些测试。
+    fn shipped_model() -> Option<std::path::PathBuf> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/model");
+        qjm::find_model(&dir)
+    }
+
+    /// 训练仓库导出的三件套；没有就跳过。
     fn export_dir() -> Option<std::path::PathBuf> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/model");
         dir.join(qjm::WEIGHTS_FILE).exists().then_some(dir)
@@ -217,6 +275,11 @@ mod tests {
         // 换过前文再换回来（缓存重算）结果不变；候选比上下文还长也不报错
         let again = scorer.score("我今天想去", &["上海"]).unwrap();
         assert!((again[0] - scores[0]).abs() < 1e-3, "{again:?}");
+        let bidirectional = scorer
+            .score_with_after("我今天想去", "吃饭", &["上海", "商量"])
+            .unwrap();
+        assert_eq!(bidirectional.len(), 2);
+        assert!(bidirectional.iter().all(|score| score.is_finite()));
         let huge: String = "字".repeat(300);
         assert!(scorer.score("", &[huge.as_str()]).unwrap()[0] < 0.0);
     }
@@ -264,6 +327,76 @@ mod tests {
             error.contains("wrong data kind") || error.contains("io error"),
             "{error}"
         );
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    /// 空后文走快速路径：只算一次正向分，不为右文项多做推理（删掉快速路径这个测试会失败）；
+    /// 有后文才是「正向 + 右文基线 + 联合」三次打分。
+    #[test]
+    fn an_empty_after_takes_the_fast_path() {
+        let Some(path) = shipped_model() else {
+            eprintln!("没有模型文件，跳过");
+            return;
+        };
+        let scorer = CharScorer::load(&path).unwrap();
+        let before = "我今天想去";
+        let texts = ["上海", "商量"];
+        let direct = scorer.score(before, &texts).unwrap();
+        let calls = scorer.score_calls();
+        let bidirectional = scorer.score_with_after(before, "", &texts).unwrap();
+        assert_eq!(scorer.score_calls(), calls + 1);
+        for (plain, both) in direct.iter().zip(&bidirectional) {
+            assert!(
+                (plain - both).abs() < 1e-9,
+                "{direct:?} vs {bidirectional:?}"
+            );
+        }
+        let calls = scorer.score_calls();
+        scorer.score_with_after(before, "吃饭", &texts).unwrap();
+        assert_eq!(scorer.score_calls(), calls + 3);
+    }
+
+    /// 旧 `.qjm` 的 `config.json` 没有修正建议字段：加载成功、打分照常，建议为 `None`（Core 用缺省上限）。
+    #[test]
+    fn a_model_without_the_cap_field_loads_with_the_default() {
+        use qingjian_core::sentence::SentenceScorer as _;
+        let Some(path) = shipped_model() else {
+            eprintln!("没有模型文件，跳过");
+            return;
+        };
+        let scorer = CharScorer::load(&path).unwrap();
+        assert_eq!(scorer.max_adjustment(), None);
+        let scores = scorer.score("我今天想去", &["上海", "吃饭"]).unwrap();
+        assert_eq!(scores.len(), 2);
+        assert!(scores.iter().all(|s| s.is_finite() && *s < 0.0));
+    }
+
+    /// `config.json` 带修正建议的模型：建议值原样带给 Core。
+    #[test]
+    fn a_packed_model_can_suggest_its_own_cap() {
+        use qingjian_core::sentence::SentenceScorer as _;
+        use qingjian_format::Writer;
+        let Some(path) = shipped_model() else {
+            eprintln!("没有模型文件，跳过");
+            return;
+        };
+        let container = Container::open(&path, Kind::Model).unwrap();
+        let mut config: serde_json::Value =
+            serde_json::from_slice(container.bytes(qjm::CONFIG_TAG).unwrap()).unwrap();
+        config["max_adjustment"] = serde_json::json!(2.5);
+        let out_dir = std::env::temp_dir().join("qingjian-neural-tests/cap");
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let out = out_dir.join("model.qjm");
+        Writer::new(Kind::Model, container.metadata())
+            .unwrap()
+            .section(qjm::CONFIG_TAG, config.to_string().as_bytes())
+            .section(qjm::VOCAB_TAG, container.bytes(qjm::VOCAB_TAG).unwrap())
+            .section(qjm::WEIGHTS_TAG, container.bytes(qjm::WEIGHTS_TAG).unwrap())
+            .write_to(&out)
+            .unwrap();
+        let scorer = CharScorer::load(&out).unwrap();
+        assert_eq!(scorer.max_adjustment(), Some(2.5));
+        assert!(scorer.score("我今天想去", &["上海"]).unwrap()[0] < 0.0);
         let _ = std::fs::remove_dir_all(&out_dir);
     }
 }

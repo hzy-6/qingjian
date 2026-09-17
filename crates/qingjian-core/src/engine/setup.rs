@@ -151,6 +151,7 @@ impl Engine {
     /// 挂上同步的整句重打分器（字级 Transformer，查询里当场打分，评测用）。`weight` 是神经分的权重 λ，
     /// `margin` 是参与重排的路径分门槛（nat），`context` 是给模型看的前文字符数；
     /// `None` 用缺省 [`NEURAL_WEIGHT`] / [`NEURAL_MARGIN`] / [`RESCORE_CONTEXT_CHARS`]。
+    /// 神经修正上限另由 [`Self::set_neural_max_adjustment`] 配置，缺省跟随模型文件的建议。
     pub fn with_sentence_scorer(
         mut self,
         scorer: Box<dyn SentenceScorer>,
@@ -158,6 +159,7 @@ impl Engine {
         margin: Option<f64>,
         context: Option<usize>,
     ) -> Self {
+        self.model_max_adjustment = scorer.max_adjustment();
         self.sentence_scorer = Some(scorer);
         self.rescorer = None;
         self.set_neural_parameters(weight, margin, context);
@@ -179,10 +181,15 @@ impl Engine {
     }
 
     /// 运行时换 / 卸异步重打分器（壳里模型在后台加载完才接上，配置关掉就卸）。
+    /// 新打分器自带的修正建议一并更新；卸掉（`None`）就回到缺省上限。
     pub fn set_async_sentence_scorer(&mut self, scorer: Option<Box<dyn SentenceScorer>>) {
         self.sentence_scorer = None;
+        self.model_max_adjustment = scorer.as_deref().and_then(SentenceScorer::max_adjustment);
         self.rescorer = scorer.map(super::rescoring::RescoreWorker::spawn);
-        *self.neural_cache.borrow_mut() = super::rescoring::NeuralCache::default();
+        // The old worker may still finish after it is replaced. Advance the
+        // request generation together with the cache clear so its result
+        // cannot be accepted by the new scorer.
+        self.forget_neural_cache();
         self.forget_span_cache();
     }
 
@@ -219,6 +226,13 @@ impl Engine {
     pub fn set_neural_weight(&mut self, weight: f64) {
         self.neural_weight = weight.clamp(0.0, 1.0);
         self.forget_span_cache();
+    }
+
+    /// 用户配置的单条路径最大神经修正（nat）：限制神经分与静态分的分差贡献，超出按上限截断，
+    /// 压住模型的异常大分差。`None`（缺省）跟随模型文件的建议（[`SentenceScorer::max_adjustment`]），
+    /// 再退缺省常量 [`NEURAL_MAX_ADJUSTMENT`]；非有限值与负数当没配（用的时候过滤）。
+    pub fn set_neural_max_adjustment(&mut self, max: Option<f64>) {
+        self.neural_max_adjustment = max;
     }
 
     fn set_neural_parameters(
@@ -296,7 +310,7 @@ impl Engine {
         self.modes
     }
 
-    /// 中英混输里中文候选是否总排在英文词前面（配置 `[general] chinese_first`，缺省关）。
+    /// 中英混输里中文候选是否总排在英文词前面（配置 `[general] chinese_first`，缺省开）。
     /// 关着时拼音「不像话」的输入英文词排第一（`hello` 先英文再 荷兰咯）；开了英文词固定第二。
     pub fn set_chinese_first(&mut self, on: bool) {
         self.chinese_first = on;

@@ -44,7 +44,7 @@ use crate::app::{Settings, logging, paths};
 use crate::candidates::{CandidateWindow, Frame, Preedit, Row};
 use crate::error::HostError;
 use crate::menubar::{InputMenu, MenuAction, ModeIndicator};
-use crate::preferences::{PreferencesWindow, Setting, SettingValue};
+use crate::preferences::{MODEL_CAPS, PreferencesWindow, Setting, SettingValue};
 
 use cloud::{CloudTestMonitor, PredictMonitor};
 use config::{ConfigWatch, TextReplacement};

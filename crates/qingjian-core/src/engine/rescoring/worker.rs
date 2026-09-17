@@ -3,15 +3,19 @@ use std::thread::JoinHandle;
 
 use crate::sentence::SentenceScorer;
 
-/// 一次打分任务：前文与一批文本。
+/// 一次打分任务：前文与一批文本。`sequence` 是引擎发出的单调递增请求序号，原样带回结果。
 struct Job {
-    context: String,
+    sequence: u64,
+    before: String,
+    after: String,
     texts: Vec<String>,
 }
 
-/// 打好的分，与任务一一对应。
+/// 打好的分，与任务一一对应。`poll_rescoring` 按序号丢弃被更新请求顶掉的旧结果。
 pub(crate) struct Scored {
-    pub context: String,
+    pub sequence: u64,
+    pub before: String,
+    pub after: String,
     pub texts: Vec<String>,
     pub scores: Vec<f64>,
 }
@@ -32,21 +36,23 @@ impl RescoreWorker {
             .name("qingjian-rescore".to_owned())
             .spawn(move || {
                 while let Ok(mut job) = job_rx.recv() {
-                    // 攒了好几条只算最后一条
+                    // 攒了好几条只算最后一条（它的序号最新）
                     while let Ok(newer) = job_rx.try_recv() {
                         job = newer;
                     }
                     let texts: Vec<&str> = job.texts.iter().map(String::as_str).collect();
                     let started = std::time::Instant::now();
-                    let scores = scorer.score(&job.context, &texts);
+                    let scores = scorer.score_with_after(&job.before, &job.after, &texts);
                     tracing::debug!(
                         texts = texts.len(),
-                        context_chars = job.context.chars().count(),
+                        context_chars = job.before.chars().count(),
                         ms = started.elapsed().as_millis(),
                         "神经重打分完成"
                     );
                     let done = Scored {
-                        context: job.context,
+                        sequence: job.sequence,
+                        before: job.before,
+                        after: job.after,
                         texts: job.texts,
                         scores,
                     };
@@ -70,8 +76,19 @@ impl RescoreWorker {
         self.handle.is_some()
     }
 
-    pub fn submit(&self, context: String, texts: Vec<String>) {
-        if self.jobs.send(Job { context, texts }).is_err() {
+    /// 提交一次打分任务。`sequence` 由引擎分配（单调递增），结果原样带回；相同 (before, after, texts)
+    /// 的两次提交都真实执行——第二次往往就是为了淘汰上一次的旧结果。
+    pub fn submit(&self, sequence: u64, before: String, after: String, texts: Vec<String>) {
+        if self
+            .jobs
+            .send(Job {
+                sequence,
+                before,
+                after,
+                texts,
+            })
+            .is_err()
+        {
             tracing::warn!("神经重打分线程已退出");
         }
     }

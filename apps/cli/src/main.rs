@@ -209,6 +209,7 @@ fn build_engine(args: &Args) -> Result<Engine, CliError> {
                 args.neural_context,
             )
         };
+        engine.set_neural_max_adjustment(args.neural_max_adjustment);
     }
     let config_path = args
         .config

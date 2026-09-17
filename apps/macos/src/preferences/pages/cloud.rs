@@ -11,15 +11,40 @@ use crate::preferences::controls::{
     set_checked, text_field,
 };
 use crate::preferences::layout::{Layout, PAGE_PADDING, ROW_HEIGHT};
-use crate::preferences::setting::Setting;
+use crate::preferences::setting::{MODEL_CAPS, Setting};
 use crate::preferences::target::PreferencesTarget;
 
 /// 云端词槽位弹出菜单的上限（配置文件里可以填更大，菜单只列到这）。
 const MAX_CLOUD_SLOTS: usize = 4;
 
+/// 「模型修正上限」菜单各档的标题，与 [`MODEL_CAPS`] 一一对应。
+const MODEL_CAP_TITLES: [&str; MODEL_CAPS.len()] =
+    ["跟随模型", "保守（2）", "适中（4）", "宽松（8）"];
+
+/// 配置值对应菜单第几档：正好在档上用那档，手改出的中间值挑最近的一档显示（距离相同取更保守的小档；
+/// 只在用户再选时才落盘）。
+fn model_cap_index(value: Option<f64>) -> usize {
+    let Some(value) = value else {
+        return 0;
+    };
+    let mut nearest = 0;
+    let mut best = f64::INFINITY;
+    for (index, option) in MODEL_CAPS.iter().enumerate().skip(1) {
+        let distance = (option.unwrap() - value).abs();
+        if distance < best {
+            best = distance;
+            nearest = index;
+        }
+    }
+    nearest
+}
+
 pub struct CloudPage {
     /// 本地整句模型开关。
     local_model: Retained<NSButton>,
+
+    /// 本地整句模型的修正上限档位。
+    model_cap: Retained<NSPopUpButton>,
 
     /// 云联想开关。
     enabled: Retained<NSButton>,
@@ -48,6 +73,20 @@ impl CloudPage {
             layout,
             mtm,
             "随包的小模型在本机给整句候选重新排序，全程离线；停键后几十毫秒生效。关掉只用词库统计。",
+        );
+        let cap_titles: Vec<String> = MODEL_CAP_TITLES.iter().map(|t| (*t).to_owned()).collect();
+        let model_cap = row_popup(
+            layout,
+            mtm,
+            "模型修正上限",
+            &cap_titles,
+            Setting::LocalModelCap,
+            target,
+        );
+        note(
+            layout,
+            mtm,
+            "模型重排一次最多把一条整句候选挪多少分：调小更稳（重排幅度受限），调大更信模型。缺省跟随模型文件自带的建议。",
         );
         let enabled = checkbox(mtm, "启用云联想", Setting::CloudEnabled, target);
         row_checkbox(layout, &enabled);
@@ -96,6 +135,7 @@ impl CloudPage {
         );
         Self {
             local_model,
+            model_cap,
             enabled,
             slots,
             base_url,
@@ -106,10 +146,15 @@ impl CloudPage {
     }
 
     /// `key_present` 是密钥已经有了（环境或配置里）；密钥框永远不回显值，只换占位文字。
-    /// `model_present` 是包里或用户目录里有模型文件，没有就把本地模型的勾选灰掉；云联想关着时它下面的项全灰。
+    /// `model_present` 是包里或用户目录里有模型文件，没有就把本地模型的勾选与上限档位灰掉；云联想关着时它下面的项全灰。
     pub fn sync(&self, config: &Config, key_present: bool, model_present: bool) {
         set_checked(&self.local_model, config.model.enabled && model_present);
         self.local_model.setEnabled(model_present);
+        select(
+            &self.model_cap,
+            Some(model_cap_index(config.model.max_adjustment)),
+        );
+        self.model_cap.setEnabled(model_present);
         set_checked(&self.enabled, config.predict.enabled);
         let cloud = config.predict.enabled;
         self.slots.setEnabled(cloud);
@@ -130,5 +175,23 @@ impl CloudPage {
         };
         self.api_key
             .setPlaceholderString(Some(&NSString::from_str(hint)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 档位映射：缺省与正好在档上的各归各位，中间值挑最近的、距离相同取更保守的小档。
+    #[test]
+    fn model_cap_index_matches_steps() {
+        assert_eq!(model_cap_index(None), 0);
+        assert_eq!(model_cap_index(Some(2.0)), 1);
+        assert_eq!(model_cap_index(Some(4.0)), 2);
+        assert_eq!(model_cap_index(Some(8.0)), 3);
+        assert_eq!(model_cap_index(Some(5.5)), 2);
+        assert_eq!(model_cap_index(Some(6.0)), 2);
+        assert_eq!(model_cap_index(Some(1.0)), 1);
+        assert_eq!(model_cap_index(Some(9.0)), 3);
     }
 }

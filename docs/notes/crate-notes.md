@@ -17,9 +17,10 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 `english`（英文模式候选）/ `engine`（`query::EnglishTail`：句末英文词并入整句，`woxiangxuehaorust` → 我想学好rust，尾段也像拼音时按分数与拼音读法比）。
 `Engine` 是对外唯一门面，`Translator` / `Learner` trait 在 `engine` 模块；词库是「主词库 + 附加词库（`set_extra_dictionaries`）+ 用户词」的列表；繁体输出（`traditional` 开关与 `traditional_map` 映射）依赖 `ferrous-opencc`（`s2tw`）在出候选与上屏边界转换，内部保持简体。
 `Engine` 是对外唯一门面，`Translator` / `Learner` trait 在 `engine` 模块；词库是「主词库 + 附加词库（`set_extra_dictionaries`）+ 用户词」的列表。
-- 中英混输的英文词位置：`Engine::set_chinese_first`（配置 `[general] chinese_first`，缺省关）关着时拼音不像话的输入英文排第一（`extras::insert_english`，
-  用户老选中文词时仍让中文在前），开着时整句先插、英文词紧随其后排第二（`query_inner` 里两步的先后按开关掉转）；句末英文词并入整句（`EnglishTail`）不受它影响。
-  缺省关是回放定的（9241 词 / 269 条英文上屏：缺省开英文首选 82.5% → 7.1%）。
+- `sentence::convert_paths` 在已有两个完整音节时将末尾单字母作为前缀参与整句转换（`nihaom` 可由「你好」+「吗」组句），单个完整音节后仍等末尾至少两个字母，避免首键高开销。
+- 中英混输的英文词位置：`Engine::set_chinese_first`（配置 `[general] chinese_first`，缺省开；CLI 不读配置，`--chinese-first` 才开）关着时拼音不像话的输入英文排第一
+  （`extras::insert_english`，用户老选中文词时仍让中文在前），开着时整句先插、英文词紧随其后排第二（`query_inner` 里两步的先后按开关掉转）；句末英文词并入整句（`EnglishTail`）不受它影响。
+  早期缺省关是回放定的（9241 词 / 269 条英文上屏：缺省开英文首选 82.5% → 7.1%），后来改成缺省开；`leis` / `hz` / `bus` / `key` 四个不像拼音的输入两种排法都有回归测试钉着（`engine/tests/english.rs`）。
 - `custom_phrase::merge_replacements` 把平台给的「输入码 → 短语」表（macOS 系统文本替换）并进配置里的自定义短语：每条占该码最靠前的空位（1–9），
   输入码不是小写字母、已有同码同文本、九位都满的跳过；Core 不管数据从哪来。
 
@@ -74,7 +75,14 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_PATHS` = 6 条路径按 `路径分 + λ·(神经分 − 静态二元分)` 重排（λ `NEURAL_WEIGHT` 0.5，
 个人 n-gram / 用户加分 / 代价不动），分走「前文 + 文本 → 神经分」缓存 `NeuralCache`；同步打分器（`with_sentence_scorer`，CLI 评测）当场补分，
 异步的（`with_async_sentence_scorer`，后台线程 `RescoreWorker`）查询不等模型：缺分的记下来，壳停键后 `request_rescoring`、`poll_rescoring` 到了再 `query` 一次。
-前文优先用壳给的应用光标前文（`set_rescoring_context`），没有用本会话最近 64 个上屏字符。CLI `--neural <导出目录>`（`--neural-weight` / `--neural-context` / `--neural-async`）。
+前文优先用壳给的应用光标前文（`set_rescoring_context` / `set_rescoring_surrounding` 给前 + 后），没有用本会话最近 64 个上屏字符。
+CLI `--neural <目录或 .qjm>`（`--neural-weight` / `--neural-margin` / `--neural-context` / `--neural-max-adjustment` / `--neural-async`）。
+
+稳定性与失效：模型分数非有限（NaN / ±inf）的路径跳过调整、保持原顺序分量（NaN 会穿过 `clamp` 毒掉排序比较器）；请求带单调递增序号，
+`poll_rescoring` 只收不小于已发出最大序号的结果——上下文字符串恰好绕回旧值的迟到结果（ABA）也不收，相同 (前文, 后文, 文本) 的重复请求仍真实执行；
+删空 / 清空缓冲区（`backspace` 等）显式作废缓存（`NeuralCache::clear`），删掉重打时同文本重新问模型。
+单条路径的最大神经修正（nat）可配置：用户配置（`Engine::set_neural_max_adjustment` / 配置 `[model] max_adjustment` / CLI）优先，
+其次模型文件 `config.json` 自带的 `max_adjustment` 建议（`SentenceScorer::max_adjustment`，旧 `.qjm` 没有这个字段，加载不失败），再退缺省 `NEURAL_MAX_ADJUSTMENT` = 8。
 
 ## crates/qingjian-lm
 
@@ -86,9 +94,8 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 ## crates/qingjian-platform
 
 `Config`（TOML 配置文件，`[general]` / `[shortcut]` / `[fuzzy]` / `[dictionaries]` / `[apps]` / `[predict]` 分节，首次运行写模板，
-`set_value` 用 toml_edit 原地改键保留注释；`[model] enabled` 本地整句模型开关，`LocalModelConfig`）；`extra_dictionaries` 列出 / 加载随包领域词库与用户 `dicts/`
-（mac 壳与 Windows Server 共用，同名 `.qj` 优先于 `.tsv`）；`protocol` 模块是 Windows Server ↔ TSF DLL 的 IPC 协议类型
-（`ClientMessage` / `ServerMessage` / `Frame` / `PreeditSegment`，全 serde，两端共用，见 `docs/design/architecture.md`「Windows：TSF」）。
+`set_value` 用 toml_edit 原地改键保留注释、`remove_value` 原地删键恢复缺省；`[model]` 本地整句模型（`enabled` 开关、`max_adjustment` 重排幅度上限，缺省跟随模型文件建议），`LocalModelConfig`）；
+`extra_dictionaries` 列出 / 加载随包领域词库与用户 `dicts/`（同名 `.qj` 优先于 `.tsv`）。
 
 ## crates/qingjian-render
 
@@ -118,7 +125,8 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 
 - 输入法菜单（状态项 + 系统输入源菜单）与偏好设置窗口都是配置文件的前端：只写 `config.toml`，`Host::apply_config` 一条通路热加载，激活期间每秒看一次文件 mtime。
 - `apps/macos/scripts/bundle.sh --install` 打包安装到 `~/Library/Input Methods/`（开发用），`--pkg` 做分发用的 pkg（装 `/Library/Input Methods/`，postinstall 跑 `qingjian-macos --register`
-  注册、启用并切成当前输入源；签名 / 公证靠 `QINGJIAN_SIGN_IDENTITY` / `QINGJIAN_INSTALLER_IDENTITY` / `QINGJIAN_NOTARY_PROFILE`，没设就 ad-hoc；`QINGJIAN_TARGET` 指定架构，
+  安装结束后由用户 launchd 的一次性任务刷新 `TextInputMenuAgent` / `imklaunchagent`，再跑一次 `qingjian-macos --register` 注册、启用并切成当前输入源；启用请求只发一次并等待用户授权，避免系统权限框循环弹出；
+  签名 / 公证靠 `QINGJIAN_SIGN_IDENTITY` / `QINGJIAN_INSTALLER_IDENTITY` / `QINGJIAN_NOTARY_PROFILE`，没设就 ad-hoc；`QINGJIAN_TARGET` 指定架构，
   成品 `target/pkg/Qingjian-<版本>-<arm64|x86_64>.pkg`）；`scripts/uninstall.sh` 卸载。
 - 日志在 `~/Library/Logs/Qingjian/`（按天分文件留 7 天，删了会重建），用户数据与配置在 `~/Library/Application Support/Qingjian/`。
 - 配置项：云联想 `[predict]`（偏好设置「云服务」页有「测试连接」按钮：`qingjian_predict::ConnectionTest` 起线程发一条最小请求，`Host` 用独立定时器 `CloudTestMonitor` 轮询结果显示到窗口底部；
@@ -136,18 +144,6 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
   `set_async_sentence_scorer` 接上，`refresh` 每键先读应用光标前 64 字给 Engine 当前文、查询后 `schedule_rescoring`，`RescoreMonitor` 停键 80 ms 请求、20 ms 轮询，
   结果到了重查一次只重画当前页（翻过页 / 动过高亮不动）；「云服务」页有开关（`[model] enabled`）。
 - 端到端验证可用 `osascript` 的 System Events 往 TextEdit 发按键再读回文本（终端需要辅助功能权限；输入法得在中文模式）。
-
-## apps/windows
-
-一个产品两个 package：`server`（Server 进程：IPC 分派 + Engine + 命名管道 + 自绘候选窗与悬浮状态条）与 `tsf`（TSF 文本服务 DLL，lib 名固定 `qingjian_tsf`），
-外加 `settings`（WinUI 3 设置程序）与 `installer`（Inno Setup）。不合成一个 crate，因为 DLL 不能带 Engine 的依赖树，见 `apps/windows/README.md`；
-协议类型在 `qingjian-platform::protocol`，设计见 `docs/design/architecture.md`「Windows：TSF」。
-
-TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解析（bit 2 避免改变键盘状态），
-仅接受单个非代理项 UTF-16 单元。字母、小键盘和 AltGr 处理不变，不保证组合音符输入。
-
-词库导入（设置「词库」页）走 `qingjian-dictionary::import` 转成 `.qj`（空词库拒绝），多选批量、成功的从 `[dictionaries] disabled` 摘掉、页面显示每个文件的结果；
-Server 每次轮询比对用户 `dicts\` 的路径 / mtime / 长度快照，配置没变也重载新增、同名更新与移除；配置解析失败时词库沿用上次有效的开关（#36）。
 
 ## assets
 

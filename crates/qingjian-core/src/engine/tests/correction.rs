@@ -1,5 +1,7 @@
 //! 拼写纠错 / 敲错边 / 模糊音。
 
+use crate::correction::Edit;
+
 use super::*;
 
 /// 每个音节都合法、整句却不通的输入（`meiganxi`）：词图里的敲错边把 没关系 读出来，作为词候选插到最前；
@@ -213,6 +215,124 @@ fn spelling_correction_fixes_one_edit_and_learns_from_enter() {
     assert_eq!(engine.take_raw(), "nihooma");
     engine.set_input("nihooma");
     assert!(engine.query().unwrap().correction.is_none());
+}
+
+/// 漏一个字母仍召回：`nhaoma`（你好吗 漏 i）按 n… hao ma 的简拼整句原样读得通，不标纠正；
+/// `nihama`（漏 o）每个音节都合法，词图里 ha → hao 的 Missing 敲错边把 你好吗 读到首位。
+#[test]
+fn missing_letter_still_recalls_the_word() {
+    let dictionary = Dictionary::parse(
+        "你好吗\tni hao ma\t5000\n你好\tni hao\t9000\n你\tni\t90000\n好\thao\t80000\n吗\tma\t70000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("nhaoma");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "你好吗");
+    assert!(query.correction.is_none());
+    engine.set_input("nihama");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "你好吗");
+    assert!(query.correction.is_none());
+}
+
+/// 漏字母漏到切不动：`youi`（友谊 you yi 漏了第二个 y）只能切出 you 加尾巴 i（i 起不了音节），
+/// 整串一处编辑里补回 y（Insert）后首位出 友谊。
+#[test]
+fn missing_letter_breaking_segmentation_gets_the_insert_edit() {
+    let dictionary =
+        Dictionary::parse("友谊\tyou yi\t8000\n友\tyou\t50000\n谊\tyi\t30000\n").unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("youi");
+    let query = engine.query().unwrap();
+    let correction = query.correction.as_ref().expect("补回 y");
+    assert_eq!(correction.corrected, "youyi");
+    assert!(matches!(correction.edit, Edit::Insert { index: 3 }));
+    assert_eq!(query.candidates.items[0].text, "友谊");
+}
+
+/// 相邻字母颠倒不只在句首：末音节里敲反的 `nihaoam`（ma → am）与 `jintain`（tian → tain）
+/// 都走相邻换位的纠正，首位出完整词。
+#[test]
+fn transposition_deep_inside_the_input_corrects_too() {
+    let dictionary = Dictionary::parse(
+        "你好吗\tni hao ma\t5000\n你好\tni hao\t9000\n你\tni\t90000\n好\thao\t80000\n吗\tma\t70000\n\
+         今天\tjin tian\t6000\n今\tjin\t50000\n天\ttian\t40000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("nihaoam");
+    let query = engine.query().unwrap();
+    assert_eq!(query.correction.as_ref().unwrap().corrected, "nihaoma");
+    assert_eq!(query.candidates.items[0].text, "你好吗");
+    engine.set_input("jintain");
+    let query = engine.query().unwrap();
+    assert_eq!(query.correction.as_ref().unwrap().corrected, "jintian");
+    assert_eq!(query.candidates.items[0].text, "今天");
+}
+
+/// 合法声母简拼的召回：`nh` 出 你好、`nhm` 出 你好吗，都是原样简拼命中、不带纠正。
+#[test]
+fn initials_recall_abbreviated_words() {
+    let dictionary = Dictionary::parse(
+        "你好吗\tni hao ma\t5000\n你好\tni hao\t9000\n你\tni\t90000\n好\thao\t80000\n吗\tma\t70000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("nh");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "你好");
+    assert!(query.correction.is_none());
+    engine.set_input("nhm");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "你好吗");
+    assert!(query.correction.is_none());
+}
+
+/// 末尾单字母的补全：`jintm`、`shenm`、`weishm` 的末尾 m 都是简拼位置，整句把整段读出来
+/// （jintm 连 m 一起读成 今天+么），首位召回完整读法，且不标纠正——末尾没打完的部分留在词图里等下一键。
+#[test]
+fn trailing_single_letter_completes_words() {
+    let dictionary = Dictionary::parse(
+        "今天\tjin tian\t6000\n今\tjin\t50000\n天\ttian\t40000\n什么\tshen me\t7000\n什\tshen\t30000\n\
+         么\tme\t20000\n为什么\twei shen me\t8000\n为\twei\t60000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    for (input, word) in [("jintm", "今天么"), ("shenm", "什么"), ("weishm", "为什么")] {
+        engine.set_input(input);
+        let query = engine.query().unwrap();
+        assert_eq!(query.candidates.items[0].text, word, "{input}");
+        assert!(query.correction.is_none(), "{input}");
+    }
+}
+
+/// 短输入不过度纠错：两三个字母不出纠正标记，候选就是原样拼音的召回，
+/// 相邻键敲错的变体词（ni→mi、ma→na、ge→he）不混进来；切不动的尾巴只留着等下一键。
+#[test]
+fn short_inputs_recall_verbatim_without_edited_variants() {
+    let dictionary = Dictionary::parse(
+        "你\tni\t90000\n咪\tmi\t40000\n吗\tma\t80000\n拿\tna\t40000\n个\tge\t90000\n和\the\t40000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    for (input, exact, adjacent) in [("ni", "你", "咪"), ("ma", "吗", "拿"), ("ge", "个", "和")]
+    {
+        engine.set_input(input);
+        let query = engine.query().unwrap();
+        assert_eq!(query.candidates.items[0].text, exact, "{input}");
+        assert!(query.correction.is_none(), "{input}");
+        assert!(
+            !query.candidates.items.iter().any(|c| c.text == adjacent),
+            "{input}"
+        );
+    }
+    // 三个字母同样不纠：nii 只按 ni 出 你，尾巴 i 不拿编辑去凑
+    engine.set_input("nii");
+    let query = engine.query().unwrap();
+    assert!(query.correction.is_none());
+    assert_eq!(query.candidates.items[0].text, "你");
+    assert_eq!(query.tail, "i");
 }
 
 #[test]

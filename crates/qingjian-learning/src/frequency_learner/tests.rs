@@ -1,4 +1,6 @@
 use super::*;
+use qingjian_core::Engine;
+use qingjian_dictionary::Dictionary;
 
 fn candidate(text: &str) -> Candidate {
     Candidate {
@@ -293,4 +295,71 @@ fn english_words_round_trip_through_tsv_and_form_a_word_list() {
     );
     let saved = std::fs::read_to_string(FrequencyLearner::english_path(&path)).unwrap();
     assert!(saved.contains("gist\t2"));
+}
+
+/// 清空学习数据后排序恢复（产品语义：学习数据是数据目录里的文件，删掉即清空）。
+/// 用带 Engine 的完整流程：连选 开发 三次并落盘 → 重开的引擎读到学习文件、开发 第一；
+/// 删掉全部学习文件再重建 → 排序回到未学习状态（词频高的 开放 第一）。
+#[test]
+fn deleting_the_learning_files_restores_the_unlearned_ranking() {
+    let dir = std::env::temp_dir().join("qingjian-clear-learning-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("user.tsv");
+    let all_files = [
+        path.clone(),
+        dir.join(USER_WORDS_FILE),
+        dir.join(USER_NGRAM_FILE),
+        dir.join(USER_CHOICES_FILE),
+        dir.join(USER_ENGLISH_FILE),
+        dir.join(USER_TYPOS_FILE),
+    ];
+    for file in &all_files {
+        let _ = std::fs::remove_file(file);
+    }
+    let dictionary = "开发\tkai fa\t9000\n开放\tkai fang\t20000\n";
+    let build = || {
+        Engine::new(Dictionary::parse(dictionary).unwrap())
+            .with_learner(Box::new(FrequencyLearner::from_path(&path).unwrap()))
+    };
+
+    // 未学习：`kaif` 首选是词频更高的 开放
+    let mut engine = build();
+    engine.set_input("kaif");
+    assert_eq!(engine.query().unwrap().candidates.items[0].text, "开放");
+
+    // 连选三次 开发，学习落盘
+    for _ in 0..3 {
+        engine.set_input("kaif");
+        let kaifa = engine
+            .query()
+            .unwrap()
+            .candidates
+            .items
+            .iter()
+            .find(|c| c.text == "开发")
+            .cloned()
+            .unwrap();
+        engine.commit(&kaifa);
+    }
+    assert_eq!(engine.learner().weight("开发"), 3);
+    engine.learner_mut().flush();
+
+    // 重开的引擎读到学习文件：开发 升到第一
+    let mut engine = build();
+    engine.set_input("kaif");
+    assert_eq!(engine.query().unwrap().candidates.items[0].text, "开发");
+    assert_eq!(engine.learner().choice_weight("kaif", "开发"), 3);
+
+    // 清空学习数据：删掉数据目录里的全部学习文件（没写出来的本来就不存在）后重建，排序回到未学习状态
+    assert!(path.is_file(), "词频文件该已落盘");
+    assert!(dir.join(USER_CHOICES_FILE).is_file(), "选择文件该已落盘");
+    for file in &all_files {
+        let _ = std::fs::remove_file(file);
+    }
+    let mut engine = build();
+    engine.set_input("kaif");
+    assert_eq!(engine.query().unwrap().candidates.items[0].text, "开放");
+    assert_eq!(engine.learner().weight("开发"), 0);
+    assert_eq!(engine.learner().choice_weight("kaif", "开发"), 0);
+    std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -134,6 +134,9 @@ pub struct Engine {
     /// 壳给的应用里光标前的文本；`None` 时前文用本会话历史。
     rescoring_before: Option<String>,
 
+    /// 壳给的应用里光标后的文本；旧模型可以忽略，新模型可用于双向重排。
+    rescoring_after: Option<String>,
+
     /// 重打分时神经得分的权重 λ：最终分 = 路径分 + λ·(神经分 − 静态分)。
     neural_weight: f64,
 
@@ -142,6 +145,15 @@ pub struct Engine {
 
     /// 重打分给模型看的前文长度（本会话最近上屏的字符数），0 为不给前文。
     neural_context: usize,
+
+    /// 用户配置的单条路径最大神经修正（nat），见 [`Self::set_neural_max_adjustment`]；`None` 跟随模型建议。
+    neural_max_adjustment: Option<f64>,
+
+    /// 模型文件建议的单条路径最大神经修正（nat），接打分器时从 [`SentenceScorer::max_adjustment`] 读一次；旧模型 `None`。
+    model_max_adjustment: Option<f64>,
+
+    /// 已发出的最大重打分请求序号：[`Self::poll_rescoring`] 只收不小于它的结果，旧请求的迟到结果（上下文字符串恰好相同也一样）丢掉。
+    rescore_sequence: u64,
 
     /// 个人 n-gram 与静态模型插值的参数；只有回放调参会改（`set_interpolation`），壳用缺省值。
     interpolation: Interpolation,
@@ -311,6 +323,9 @@ const RESCORE_PATHS: usize = 6;
 /// 取 0.5 给个人 n-gram 留余量；回放里看到的「λ 大整句掉」是那把尺子的偏差。
 pub const NEURAL_WEIGHT: f64 = 0.5;
 
+/// 单条路径允许的最大神经修正（nat），避免模型异常分数一次性压过词频和个人学习。
+pub const NEURAL_MAX_ADJUSTMENT: f64 = 8.0;
+
 /// 神经重打分的缺省门槛（nat）：路径分落后最优路径超过这么多的不参与重排。缺省不设（4 nat 试过没帮助），留作调参的旋钮。
 pub const NEURAL_MARGIN: f64 = f64::INFINITY;
 
@@ -332,18 +347,22 @@ impl Engine {
             punctuation: Punctuation::default(),
             full_width_punctuation: true,
             custom_phrases: Vec::new(),
-            chinese_first: false,
+            chinese_first: true,
             predictor: Box::new(NoPredictor),
             language_model: Box::new(NoLanguageModel),
             sentence_scorer: None,
             rescorer: None,
             neural_cache: std::cell::RefCell::new(rescoring::NeuralCache::default()),
             rescoring_before: None,
+            rescoring_after: None,
             neural_weight: NEURAL_WEIGHT,
             neural_margin: NEURAL_MARGIN,
             interpolation: Interpolation::DEFAULT,
             typo_costs: TypoCosts::DEFAULT,
             neural_context: RESCORE_CONTEXT_CHARS,
+            neural_max_adjustment: None,
+            model_max_adjustment: None,
+            rescore_sequence: 0,
             correction_cache: std::cell::RefCell::new(None),
             span_cache: std::cell::RefCell::new(sentence::SpanCache::default()),
             recent_commits: Vec::new(),

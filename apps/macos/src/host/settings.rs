@@ -333,6 +333,16 @@ impl Host {
             (Setting::LocalModelEnabled, SettingValue::Bool(on)) => {
                 self.settings.set_bool("model", "enabled", on);
             }
+            // 第 0 档「跟随模型」删掉键恢复缺省，其余档写具体数值
+            (Setting::LocalModelCap, SettingValue::Index(index)) => match MODEL_CAPS.get(index) {
+                Some(Some(value)) => {
+                    self.settings.set_value("model", "max_adjustment", *value);
+                }
+                Some(None) => {
+                    self.settings.remove_value("model", "max_adjustment");
+                }
+                None => tracing::warn!(index, "不认识的模型修正上限档位"),
+            },
             (Setting::CloudSlots, SettingValue::Index(index)) => {
                 self.settings.set_value("predict", "slots", index as i64);
             }

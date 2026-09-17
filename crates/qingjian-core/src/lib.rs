@@ -1,8 +1,8 @@
 //! 青简输入法内核。
 //!
 //! 平台无关：词库、拼音解析、候选生成、排序、学习与翻译的接口全部在这里。
-//! 平台层（IMK / TSF / IBus-Fcitx）只负责把按键喂给 [`Engine`]、把候选画出来。
-//! 判断标准：换掉 IMK 换成 TSF，不应该需要改这里的任何一行。
+//! macOS 壳（IMK）只负责把按键喂给 [`Engine`]、把候选画出来。
+//! 输入引擎不依赖 AppKit 或 Input Method Kit。
 
 pub mod candidate;
 pub mod composition;
@@ -35,8 +35,8 @@ pub use engine::{
     AnnotationReport, BOOKS, Book, CloudWord, CommitEntry, Engine, EngineSession, FRESH_UNTIL,
     FilledGloss, Forgotten, GlossFiller, INPUT_LOG_VERSION, InputLogEntry, InputLogger,
     InputSource, Learner, LevelCount, MarkedKind, MarkedSegment, ModeKeys, NEURAL_MARGIN,
-    NEURAL_WEIGHT, NoGlossFiller, NoInputLogger, NoLearner, NoPredictor, NoTranslator,
-    NoUsageMeter, NoVocabularyTracker, Prediction, PredictionKind, PredictionPolicy,
+    NEURAL_MAX_ADJUSTMENT, NEURAL_WEIGHT, NoGlossFiller, NoInputLogger, NoLearner, NoPredictor,
+    NoTranslator, NoUsageMeter, NoVocabularyTracker, Prediction, PredictionKind, PredictionPolicy,
     PredictionRequest, Predictor, QUESTION_PREFIX, Query, RESCORE_CONTEXT_CHARS, SurroundingText,
     Timings, Translator, Usage, UsageMeter, UsageSummary, VocabularySummary, VocabularyTracker,
     book_scale,

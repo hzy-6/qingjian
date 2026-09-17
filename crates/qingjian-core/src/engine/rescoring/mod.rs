@@ -39,17 +39,41 @@ impl Engine {
     /// 壳告知应用里光标前的文本（每次查询前给；应用给不出就 `None`，退回本会话历史）。
     pub fn set_rescoring_context(&mut self, before: Option<String>) {
         self.rescoring_before = before;
+        self.rescoring_after = None;
+    }
+
+    /// 壳告知应用里光标前后的文本，供支持双向上下文的新模型使用。
+    pub fn set_rescoring_surrounding(&mut self, before: Option<String>, after: Option<String>) {
+        self.rescoring_before = before;
+        self.rescoring_after = after;
+    }
+
+    fn rescoring_after(&self) -> String {
+        self.rescoring_after.clone().unwrap_or_default()
+    }
+
+    /// 本次重排用的神经修正上限（nat）：用户配置（[`Engine::set_neural_max_adjustment`]）优先，
+    /// 其次模型文件自带的建议（[`SentenceScorer::max_adjustment`]），都没有用缺省 [`NEURAL_MAX_ADJUSTMENT`]；
+    /// 非有限值与负数一律当没配。
+    fn neural_adjustment_cap(&self) -> f64 {
+        self.neural_max_adjustment
+            .or(self.model_max_adjustment)
+            .filter(|cap| cap.is_finite() && *cap >= 0.0)
+            .unwrap_or(NEURAL_MAX_ADJUSTMENT)
     }
 
     /// 把几条整句路径按「路径分 + λ·(神经分 − 静态分)」重排。缓存里缺分的：同步打分器当场补，异步的先记下等壳来取；
-    /// 有任何一条没分就不动顺序（半截重排比不重排还糟）。
+    /// 有任何一条没分就不动顺序（半截重排比不重排还糟）。模型分数非有限（NaN / ±inf）的路径跳过调整，
+    /// 保持原顺序分量——NaN 进了分数会把排序比较器整个毒掉。
     pub(super) fn rescore_paths(&self, paths: &mut [Conversion]) {
         if paths.len() < 2 || !self.has_sentence_scorer() {
             return;
         }
         let context = self.rescoring_context();
+        let after = self.rescoring_after();
+        let cache_context = format!("{context}\0{after}");
         let mut cache = self.neural_cache.borrow_mut();
-        cache.ensure_context(&context);
+        cache.ensure_context(&cache_context);
         let mut missing: Vec<String> = Vec::new();
         for path in paths.iter() {
             if cache.get(&path.text).is_none() && !missing.contains(&path.text) {
@@ -60,7 +84,7 @@ impl Engine {
             match &self.sentence_scorer {
                 Some(scorer) => {
                     let texts: Vec<&str> = missing.iter().map(String::as_str).collect();
-                    let scores = scorer.score(&context, &texts);
+                    let scores = scorer.score_with_after(&context, &after, &texts);
                     if scores.len() != texts.len() {
                         return;
                     }
@@ -77,9 +101,14 @@ impl Engine {
             }
         }
         let lambda = self.neural_weight;
+        let cap = self.neural_adjustment_cap();
         for path in paths.iter_mut() {
             let neural = cache.get(&path.text).expect("filled above");
-            path.score += lambda * (neural - path.static_score);
+            let adjustment = lambda * (neural - path.static_score);
+            // ±inf 会被 clamp 成上限、NaN 穿过 clamp：两者都不该动这条路径的分
+            if adjustment.is_finite() {
+                path.score += adjustment.clamp(-cap, cap);
+            }
         }
         paths.sort_by(|a, b| {
             b.score
@@ -95,6 +124,7 @@ impl Engine {
     }
 
     /// 把攒着的文本送去后台打分。没接异步打分器或没什么要打的返回 `false`。
+    /// 相同 (before, after, texts) 的两次请求都真实执行：缓存失效后同文本再来一次正是为了淘汰旧结果。
     pub fn request_rescoring(&mut self) -> bool {
         let Some(worker) = &self.rescorer else {
             return false;
@@ -105,19 +135,29 @@ impl Engine {
             return false;
         }
         tracing::debug!(texts = wanted.len(), "神经重打分请求");
-        worker.submit(cache.context().to_owned(), wanted);
+        let mut parts = cache.context().split('\0');
+        let before = parts.next().unwrap_or_default().to_owned();
+        let after = parts.next().unwrap_or_default().to_owned();
+        self.rescore_sequence += 1;
+        worker.submit(self.rescore_sequence, before, after, wanted);
         true
     }
 
-    /// 收后台打好的分。有新分进了缓存返回 `true`，壳该重新 [`Self::query`] 一次；前文已经变了的结果丢掉。
+    /// 收后台打好的分。有新分进了缓存返回 `true`，壳该重新 [`Self::query`] 一次；
+    /// 只收序号不小于引擎已发出最大序号的结果——被更新请求顶掉的旧结果即使上下文字符串恰好回到相同的值也丢掉。
     pub fn poll_rescoring(&mut self) -> bool {
         let Some(worker) = &self.rescorer else {
             return false;
         };
         let mut updated = false;
         while let Some(scored) = worker.poll() {
+            if scored.sequence < self.rescore_sequence {
+                continue;
+            }
             let mut cache = self.neural_cache.borrow_mut();
-            if scored.context != cache.context() || scored.scores.len() != scored.texts.len() {
+            let expected = cache.context();
+            let actual = format!("{}\0{}", scored.before, scored.after);
+            if actual != expected || scored.scores.len() != scored.texts.len() {
                 continue;
             }
             for (text, score) in scored.texts.iter().zip(scored.scores) {
@@ -126,5 +166,11 @@ impl Engine {
             updated = true;
         }
         updated
+    }
+
+    /// 显式作废攒下的神经分（前文没变也一样）：删空 / 清空缓冲区后，同文本的旧分不再代表当前这段组句的意图，下次重新问模型。
+    pub(super) fn forget_neural_cache(&mut self) {
+        self.rescore_sequence = self.rescore_sequence.wrapping_add(1);
+        self.neural_cache.borrow_mut().clear();
     }
 }

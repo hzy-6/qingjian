@@ -154,7 +154,7 @@ define_class!(
 /// 翻译选中文字最多接受多少个字符：再长既慢又贵，也不是输入法该干的事。
 const MAX_TRANSLATE_CHARS: usize = 500;
 
-/// 给本地整句模型看的光标前文最多读多少字符（Engine 自己再按它的前文长度截）。
+/// 给本地整句模型看的光标前后文最多读多少字符（Engine 自己再按模型上下文长度截）。
 const RESCORE_LOOKBACK: usize = qingjian_core::RESCORE_CONTEXT_CHARS;
 
 fn digit_key(key_code: u16) -> Option<usize> {
@@ -662,18 +662,22 @@ impl QingjianInputController {
             h.engine.has_sentence_scorer() && h.engine.composition().text().chars().count() == 1
         })
         .unwrap_or(false);
-        let before = if wants_context && !secure_input::enabled() {
-            Some(
-                client
-                    .surrounding_text(RESCORE_LOOKBACK, 0)
-                    .map(|text| text.before),
-            )
+        let surrounding = if wants_context && !secure_input::enabled() {
+            client
+                .surrounding_text(RESCORE_LOOKBACK, RESCORE_LOOKBACK)
+                .map(|text| (text.before, text.after))
         } else {
             None
         };
         let Some((marked, cursor, inline)) = host::with(|h| {
-            if let Some(before) = before {
-                h.engine.set_rescoring_context(before);
+            if wants_context {
+                match surrounding {
+                    Some((before, after)) => {
+                        h.engine
+                            .set_rescoring_surrounding(Some(before), Some(after));
+                    }
+                    None => h.engine.set_rescoring_surrounding(None, None),
+                }
             }
             // 查询失败（整段切不动）时退回显示原始字母
             let mut marked = h.engine.composition().text().to_owned();

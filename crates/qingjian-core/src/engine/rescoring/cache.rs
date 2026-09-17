@@ -38,6 +38,14 @@ impl NeuralCache {
         &self.context
     }
 
+    /// 整张作废，前文没变也一样：删空 / 清空缓冲区后的显式失效（见 `Engine::forget_neural_cache`），
+    /// 同一段前文下已经算出的分不再代表当前意图，同文本要重新问模型。
+    pub fn clear(&mut self) {
+        self.context.clear();
+        self.scores.clear();
+        self.wanted.clear();
+    }
+
     pub fn get(&self, text: &str) -> Option<f64> {
         self.scores.get(text).copied()
     }

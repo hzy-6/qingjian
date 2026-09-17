@@ -66,10 +66,6 @@ fn english_word_yields_to_a_chinese_word_the_user_keeps_choosing() {
     let mut engine = Engine::new(dictionary)
         .with_english(WordList::parse("key\n").unwrap())
         .with_learner(Box::new(CountingLearner(HashMap::new())));
-    let first_two = |engine: &Engine| {
-        let all = texts_of(engine);
-        (all[0].clone(), all[1].clone())
-    };
     let pick = |engine: &mut Engine, text: &str| {
         engine.set_input("key");
         let candidate = engine
@@ -85,20 +81,156 @@ fn english_word_yields_to_a_chinese_word_the_user_keeps_choosing() {
     // 开了中文优先：ke'y 再不像话，中文词也在前、英文第二
     engine.set_chinese_first(true);
     engine.set_input("key");
-    assert_eq!(first_two(&engine), ("可以".into(), "key".into()));
-    // 缺省关：末尾落单一个字母、拼音不像话，英文词在前
+    let all = texts_of(&engine);
+    assert_eq!((&all[0], &all[1]), (&"可以".to_owned(), &"key".to_owned()));
+    // 关闭中文优先时，末尾落单一个字母、拼音不像话，英文词在前
     engine.set_chinese_first(false);
     engine.set_input("key");
-    assert_eq!(first_two(&engine), ("key".into(), "可以".into()));
+    assert_eq!(texts_of(&engine)[0], "key");
     // 这段字母下选过一次 可以：中文在前，英文退到第二
     pick(&mut engine, "可以");
     engine.set_input("key");
-    assert_eq!(first_two(&engine), ("可以".into(), "key".into()));
+    assert_eq!(texts_of(&engine)[0], "可以");
     // 之后选英文词的次数反超：英文回到第一
     pick(&mut engine, "key");
     pick(&mut engine, "key");
     engine.set_input("key");
-    assert_eq!(first_two(&engine), ("key".into(), "可以".into()));
+    assert_eq!(texts_of(&engine)[0], "key");
+}
+
+/// 中英混输排序回归用的词库：每个不像拼音的输入（leis / hz / bus / key）都有中文词可出。
+const MIXED: &str = "类似\tlei si\t8000\n累死\tlei si\t100\n孩子\thai zi\t5000\n还在\thai zai\t3000\n\
+    不是\tbu shi\t6000\n不说\tbu shuo\t2000\n可以\tke yi\t9000\n客运\tke yun\t100\n";
+
+/// 回归用的英文词表，词频照抄 data/generated/english.tsv 里的实际值（hz 的写法是 Hz）。
+const MIXED_ENGLISH: &str = "leis\tleis\t2170\nHz\thz\t3340\nbus\tbus\t4830\nkey\tkey\t5120\n";
+
+/// 不像拼音的四个输入与它们在该词表里的（显示写法，首选中文词）。
+const UNLIKELY: &[(&str, &str, &str)] = &[
+    ("leis", "leis", "类似"),
+    ("hz", "Hz", "孩子"),
+    ("bus", "bus", "不是"),
+    ("key", "key", "可以"),
+];
+
+fn mixed_engine() -> Engine {
+    Engine::new(Dictionary::parse(MIXED).unwrap())
+        .with_english(WordList::parse(MIXED_ENGLISH).unwrap())
+}
+
+/// 关中文优先时，不像拼音的输入英文词排第一，中文候选仍在其后可见。
+#[test]
+fn english_first_when_chinese_first_is_off_for_all_unlikely_inputs() {
+    let mut engine = mixed_engine();
+    engine.set_chinese_first(false);
+    for &(input, english, _) in UNLIKELY {
+        engine.set_input(input);
+        let query = engine.query().unwrap();
+        assert_eq!(query.candidates.items[0].text, english, "输入 {input}");
+        assert_eq!(query.candidates.items[0].kind, CandidateKind::English);
+        assert!(
+            query
+                .candidates
+                .items
+                .iter()
+                .skip(1)
+                .any(|c| c.kind == CandidateKind::Chinese),
+            "输入 {input} 的英文词不该把中文候选挤掉"
+        );
+    }
+}
+
+/// 开中文优先时，第 1 项是中文、英文词紧跟其后（不晚于第 2 位），再往后中文候选仍可见。
+#[test]
+fn chinese_first_keeps_chinese_on_top_and_english_second_for_all_unlikely_inputs() {
+    let mut engine = mixed_engine();
+    engine.set_chinese_first(true);
+    for &(input, english, chinese) in UNLIKELY {
+        engine.set_input(input);
+        let query = engine.query().unwrap();
+        assert_eq!(query.candidates.items[0].text, chinese, "输入 {input}");
+        assert!(matches!(
+            query.candidates.items[0].kind,
+            CandidateKind::Chinese | CandidateKind::Sentence
+        ));
+        assert_eq!(query.candidates.items[1].text, english, "输入 {input}");
+        assert!(
+            query
+                .candidates
+                .items
+                .iter()
+                .skip(2)
+                .any(|c| matches!(c.kind, CandidateKind::Chinese | CandidateKind::Sentence)),
+            "输入 {input} 的英文词与补全之后中文候选仍可见"
+        );
+    }
+}
+
+/// 开中文优先时，英文词被选再多次（词频学习再高）也不能把中文挤下第一。
+#[test]
+fn heavy_english_learning_never_displaces_chinese_when_chinese_first_is_on() {
+    let mut engine = mixed_engine().with_learner(Box::new(CountingLearner(HashMap::new())));
+    engine.set_chinese_first(true);
+    for &(input, english, chinese) in UNLIKELY {
+        // 英文词连选五次：词频记到 5，远超一次中文选择能积到的选择计数
+        for _ in 0..5 {
+            engine.set_input(input);
+            let word = engine
+                .query()
+                .unwrap()
+                .candidates
+                .items
+                .iter()
+                .find(|c| c.text == english)
+                .cloned()
+                .unwrap();
+            engine.commit(&word);
+        }
+        assert_eq!(engine.learner().weight(english), 5, "输入 {input}");
+        engine.set_input(input);
+        let query = engine.query().unwrap();
+        assert_eq!(query.candidates.items[0].text, chinese, "输入 {input}");
+        assert_eq!(query.candidates.items[1].text, english, "输入 {input}");
+    }
+}
+
+/// 关中文优先时，用户在某个不像拼音的输入下选过中文词后中文反超英文（leis / hz / bus；
+/// key 由 `english_word_yields_to_a_chinese_word_the_user_keeps_choosing` 覆盖），
+/// 之后英文词被选的次数反超，英文又回到第一。
+#[test]
+fn chinese_choice_beats_english_frequency_for_all_unlikely_inputs() {
+    let mut engine = mixed_engine().with_learner(Box::new(CountingLearner(HashMap::new())));
+    engine.set_chinese_first(false);
+    let pick = |engine: &mut Engine, input: &str, text: &str| {
+        engine.set_input(input);
+        let candidate = engine
+            .query()
+            .unwrap()
+            .candidates
+            .items
+            .into_iter()
+            .find(|c| c.text == text)
+            .unwrap();
+        engine.commit(&candidate);
+    };
+    // key 一并纳入这条路径，确认机制对四个输入一致
+    for &(input, english, chinese) in UNLIKELY {
+        engine.set_input(input);
+        assert_eq!(texts_of(&engine)[0], english, "输入 {input} 初始应英文在前");
+        pick(&mut engine, input, chinese);
+        engine.set_input(input);
+        let all = texts_of(&engine);
+        assert_eq!(all[0], chinese, "输入 {input} 选过中文后应中文在前");
+        assert_eq!(all[1], english);
+        pick(&mut engine, input, english);
+        pick(&mut engine, input, english);
+        engine.set_input(input);
+        assert_eq!(
+            texts_of(&engine)[0],
+            english,
+            "输入 {input} 英文词频反超后英文回第一"
+        );
+    }
 }
 
 #[test]

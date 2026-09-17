@@ -7,6 +7,7 @@ mod emoji;
 mod english;
 mod learning;
 mod lookup;
+mod personalization;
 mod privacy;
 mod shuangpin;
 mod zhuyin;

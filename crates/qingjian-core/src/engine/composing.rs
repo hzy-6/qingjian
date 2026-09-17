@@ -61,7 +61,7 @@ impl Engine {
         }
     }
 
-    /// 壳告知正在输入的应用（macOS bundle identifier / Windows exe 名），写进输入日志；不知道就给 `None`。
+    /// 壳告知正在输入的应用（macOS bundle identifier），写进输入日志；不知道就给 `None`。
     pub fn set_application(&mut self, app: Option<String>) {
         self.application = app;
     }
@@ -150,9 +150,18 @@ impl Engine {
         self.composition.push(c);
     }
 
+    /// 删空了缓冲区（退格 / 前删 / 删音节 / 删到开头）：这段组句作废，攒下的神经分不能再当旧意图复用。
+    fn note_emptied(&mut self, deleted: bool) -> bool {
+        if deleted && self.composition.is_empty() {
+            self.forget_neural_cache();
+        }
+        deleted
+    }
+
     pub fn backspace(&mut self) -> bool {
         self.note_edit();
-        self.composition.backspace()
+        let deleted = self.composition.backspace();
+        self.note_emptied(deleted)
     }
 
     pub fn clear(&mut self) {
@@ -160,6 +169,8 @@ impl Engine {
         self.chain.leave_buffer();
         // 壳给的光标前文只对这段组句有效，下一段第一键再读
         self.rescoring_before = None;
+        self.rescoring_after = None;
+        self.forget_neural_cache();
         self.retype_snapshot = None;
         self.composition_started = None;
         self.page_turns = 0;
@@ -168,7 +179,8 @@ impl Engine {
 
     pub fn delete_forward(&mut self) -> bool {
         self.note_edit();
-        self.composition.delete_forward()
+        let deleted = self.composition.delete_forward();
+        self.note_emptied(deleted)
     }
 
     /// 删掉光标前的一个音节（壳里 ⌥⌫）：全拼按最优切分的最后一个音节连同它后面的 `'`，切不动的尾巴整个删；
@@ -181,7 +193,8 @@ impl Engine {
         let plain =
             self.raw_mode() || self.expression_mode() || self.question_mode() || self.zhuyin;
         let len = unit_len_before(before, self.shuangpin.is_some(), plain);
-        self.composition.delete_before_cursor(len)
+        let deleted = self.composition.delete_before_cursor(len);
+        self.note_emptied(deleted)
     }
 
     /// 光标向左跳过一个音节，遇 `'` 连它一起跳过。光标在开头时返回 `false`。
@@ -208,7 +221,8 @@ impl Engine {
     pub fn delete_to_start(&mut self) -> bool {
         self.note_edit();
         let cursor = self.composition.cursor();
-        self.composition.delete_before_cursor(cursor)
+        let deleted = self.composition.delete_before_cursor(cursor);
+        self.note_emptied(deleted)
     }
 
     pub fn move_cursor_left(&mut self) -> bool {

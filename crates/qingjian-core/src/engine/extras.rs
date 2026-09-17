@@ -54,8 +54,8 @@ impl Engine {
     }
 
     /// 中英混输：整段输入是英文词就把它加进候选。
-    /// 缺省作为拼音「不像话」（切不动、或除末尾外还有声母缩写 / 残缺音节）时排第一，否则排第二；
-    /// 开了中文优先（`chinese_first`）整句 / 首个中文候选已经在前，英文词排第二。没有中文候选时总在第一。
+    /// 拼音「不像话」（切不动、或除末尾外还有声母缩写 / 残缺音节）时加入英文词和补全。
+    /// 未开启 `chinese_first` 时，英文可按词频和学习结果排第一；开启后由查询流程保证中文在前。
     pub(super) fn insert_english(&self, items: &mut Vec<Candidate>, unlikely_pinyin: bool) {
         let lists = self.english_lists();
         if lists.is_empty() {
@@ -73,8 +73,6 @@ impl Engine {
             translation: None,
         };
         let word = lists.iter().find_map(|words| words.get(text));
-        // 这段字母下用户选中文词（`key` → 可以）比选英文词的次数多：中文词留在第一，英文让到后面；
-        // 拼音再不像话也是他自己教的
         let chosen = items
             .first()
             .filter(|c| c.kind == CandidateKind::Chinese)
