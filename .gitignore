@@ -8,3 +8,5 @@
 .playwright-mcp/
 .idea
 /tools/design/icon
+
+__pycache__/

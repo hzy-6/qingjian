@@ -15,8 +15,9 @@ pub struct DictionariesConfig {
     pub disabled: Vec<String>,
 }
 
-/// 缺省打开的随包领域词库：成语四字全拼几乎不歧义，收益稳；其余按需打开。
-pub const DEFAULT_DOMAINS: [&str; 1] = ["idioms"];
+/// 缺省打开的随包领域词库：成语四字全拼几乎不歧义，收益稳；IT 词在现代输入里足够通用
+/// （整句评测 +1.4 个点，真实日志回放词级/整句零回归），其余按需打开。
+pub const DEFAULT_DOMAINS: [&str; 2] = ["idioms", "it_computing"];
 
 impl Default for DictionariesConfig {
     fn default() -> Self {
