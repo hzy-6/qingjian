@@ -15,9 +15,14 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 模块：`composition` / `parser` / `correction`（拼写纠错：整段一两处编辑的候选纠正——单错压不过原样时再叠一处高频编辑联合纠错，`second_variants` 只出换位 / 相邻键替换 / 多敲 + `typo` 音节级敲错变体表，后者进整句词图当带代价的边）/
 `candidate` / `ranking` / `shortcut` / `sentence` / `fuzzy` / `shuangpin`（双拼：四套方案键位表、键 → 全拼解码与消耗换算）/ `zhuyin`（大千注音：键 → 注音符号 → 拼音，`[general] zhuyin` 开关，声调只判音节完整不进查询）/ `emoji` /
 `english`（英文模式候选）/ `engine`（`query::EnglishTail`：句末英文词并入整句，`woxiangxuehaorust` → 我想学好rust，尾段也像拼音时按分数与拼音读法比）。
-`Engine` 是对外唯一门面，`Translator` / `Learner` trait 在 `engine` 模块；词库是「主词库 + 附加词库（`set_extra_dictionaries`）+ 用户词」的列表；繁体输出（`traditional` 开关与 `traditional_map` 映射）依赖 `ferrous-opencc`（`s2tw`）在出候选与上屏边界转换，内部保持简体。
+`Engine` 是对外唯一门面，`Translator` / `Learner` trait 在 `engine` 模块；词库是「主词库 + 附加词库（`set_extra_dictionaries`）+ 用户词」的列表；评测发现的常用词缺口按 `domain_words.tsv` 规范人工补过一批
+（会议室 / 这辆 / 母亲河 / 吓倒 / 三份 / 各部门 / 带货 / 银杏叶 / 轻拂，另调 微信 / 乘凉 频次）；生活闲聊词库 462 条（桌面 词库/生活闲聊词库_青简.tsv，贪心最长切分 + 单字读音校验，修正 9 处源文件拼音标注）并入 domain_words.tsv 与 dict.tsv；剩余 22 条 miss 的根因结论与复开条件见 [eval-miss-closeout.md](eval-miss-closeout.md)；生活闲聊词库 462+49+6 条并入选源评估见 [chat-lexicon.md](chat-lexicon.md)；随包模型换为 uer/gpt2-chinese-cluecorpussmall 102M 转制版（Apache-2.0，加载器新增可选 `head.weight` 支持不共享输出头的模型）；繁体输出（`traditional` 开关与 `traditional_map` 映射）依赖 `ferrous-opencc`（`s2tw`）在出候选与上屏边界转换，内部保持简体。
 `Engine` 是对外唯一门面，`Translator` / `Learner` trait 在 `engine` 模块；词库是「主词库 + 附加词库（`set_extra_dictionaries`）+ 用户词」的列表。
 - `sentence::convert_paths` 在已有两个完整音节时将末尾单字母作为前缀参与整句转换（`nihaom` 可由「你好」+「吗」组句），单个完整音节后仍等末尾至少两个字母，避免首键高开销。
+- 整句候选的跨切分仲裁：parser 首切是「音节少、前面音节长」的贪心结果（`bange` → `bang e`），语言模型时常更认可另一支（`ban ge` → 半个小时，整句评测上从 67.6% 提到 69.8%）。
+  `plain_sentence` 对前 `SENTENCE_SEGMENTATIONS` = 4 个切分各做一次静态整句转换（`convert_sentence_raw`，不重排），赢家再单独做神经重排（各切分都重排太贵）。
+  仲裁三道闸：两边音节全完整且音节数一样（含简拼 / 前缀的切分分数没法比）、对手要赢出 `SENTENCE_ARBITRATION_MARGIN` = 2.5 nat（个人 n-gram / 敲错折扣喂出来的小分差不作数）、
+  首切的最优路径没走敲错 / 模糊边（`nineng` 按 `nin eng` + 个人敲错表是用户自己的读法，不让干净切分压掉）。回归测试在 `engine/tests/lookup.rs`。
 - 中英混输的英文词位置：`Engine::set_chinese_first`（配置 `[general] chinese_first`，缺省开；CLI 不读配置，`--chinese-first` 才开）关着时拼音不像话的输入英文排第一
   （`extras::insert_english`，用户老选中文词时仍让中文在前），开着时整句先插、英文词紧随其后排第二（`query_inner` 里两步的先后按开关掉转）；句末英文词并入整句（`EnglishTail`）不受它影响。
   早期缺省关是回放定的（9241 词 / 269 条英文上屏：缺省开英文首选 82.5% → 7.1%），后来改成缺省开；`leis` / `hz` / `bus` / `key` 四个不像拼音的输入两种排法都有回归测试钉着（`engine/tests/english.rs`）。
@@ -72,7 +77,10 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 `model.safetensors` + `config.json` + `vocab.json`），给「前文 + 整句」按字累加 log 概率；前文的每层 K / V 缓存（`PrefixCache`），
 同一段前文只算一次，每个候选只算自己那几个字（64 字前文 × 8 条 28 ms，Metal）。features `accelerate` / `metal` 换后端，壳用 `metal`。
 
-Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_PATHS` = 6 条路径按 `路径分 + λ·(神经分 − 静态二元分)` 重排（λ `NEURAL_WEIGHT` 0.5，
+Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_PATHS` = 8 条路径按 `路径分 + λ·(神经分 − 静态二元分)` 重排（λ `NEURAL_WEIGHT` 0.5，
+路径集含分歧链：Viterbi 按「结尾词」取路径时每个词只带最优前驱链，前几名全是同一主干只换末字的近重复。
+分歧链 = 最优链上任意节点换它的次优前驱（`viterbi.rs` 的 `back2`），末位的（`雨下得很大` 对 `余下的很大`，神经分差 11 nat）
+与中段的（`需要[再|在]研究`）都进池；分歧只在 k > 1 时生成——它们按全分复活被束宽剪掉的路径，自己当首选不如束内最优稳（真实回放 -1.6 个点），交给重排器再判才有净收益。
 个人 n-gram / 用户加分 / 代价不动），分走「前文 + 文本 → 神经分」缓存 `NeuralCache`；同步打分器（`with_sentence_scorer`，CLI 评测）当场补分，
 异步的（`with_async_sentence_scorer`，后台线程 `RescoreWorker`）查询不等模型：缺分的记下来，壳停键后 `request_rescoring`、`poll_rescoring` 到了再 `query` 一次。
 前文优先用壳给的应用光标前文（`set_rescoring_context` / `set_rescoring_surrounding` 给前 + 后），没有用本会话最近 64 个上屏字符。
@@ -82,7 +90,9 @@ CLI `--neural <目录或 .qjm>`（`--neural-weight` / `--neural-margin` / `--neu
 `poll_rescoring` 只收不小于已发出最大序号的结果——上下文字符串恰好绕回旧值的迟到结果（ABA）也不收，相同 (前文, 后文, 文本) 的重复请求仍真实执行；
 删空 / 清空缓冲区（`backspace` 等）显式作废缓存（`NeuralCache::clear`），删掉重打时同文本重新问模型。
 单条路径的最大神经修正（nat）可配置：用户配置（`Engine::set_neural_max_adjustment` / 配置 `[model] max_adjustment` / CLI）优先，
-其次模型文件 `config.json` 自带的 `max_adjustment` 建议（`SentenceScorer::max_adjustment`，旧 `.qjm` 没有这个字段，加载不失败），再退缺省 `NEURAL_MAX_ADJUSTMENT` = 8。
+其次模型文件 `config.json` 自带的 `max_adjustment` 建议（`SentenceScorer::max_adjustment`，旧 `.qjm` 没有这个字段，加载不失败），再退缺省 `NEURAL_MAX_ADJUSTMENT` = 12
+（路径集含分歧链后 12 比 8 高 0.7 个点，真实回放带重排逐条一致）。重排参与门槛缺省 `NEURAL_MARGIN` = 8 nat
+（与不设限同分、重排开销约减半；5 会漏掉词库新补词的翻案差 0.7 个点）。
 
 ## crates/qingjian-lm
 
