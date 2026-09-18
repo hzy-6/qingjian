@@ -68,7 +68,11 @@ impl CharLm {
         }
         let ln_f = layer_norm(cfg.n_embd, 1e-5, vb.pp("ln_f"))?;
         let dtype = tok_weight.dtype();
-        let head = Linear::new(tok_weight, None);
+        // 输出层默认复用输入嵌入（权重共享）；带 `head.weight` 的模型（如 HF 不共享输出头的 GPT-2）用它
+        let head_weight = vb
+            .get((cfg.vocab_size, cfg.n_embd), "head.weight")
+            .unwrap_or(tok_weight);
+        let head = Linear::new(head_weight, None);
         Ok(Self {
             tok_emb,
             pos_emb,

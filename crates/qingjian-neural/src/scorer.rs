@@ -260,9 +260,10 @@ mod tests {
         let scores = scorer
             .score("我今天想去", &["上海", "伤害", "吃饭"])
             .unwrap();
-        assert!((scores[0] - -4.981).abs() < 0.05, "{scores:?}");
-        assert!((scores[1] - -13.113).abs() < 0.05, "{scores:?}");
-        assert!((scores[2] - -6.491).abs() < 0.05, "{scores:?}");
+        // 随包模型换成 Wenzhong-GPT2-110M 转制版后按实测更新（原小模型：-4.981 / -13.113 / -6.491）
+        assert!((scores[0] - -5.172).abs() < 0.05, "{scores:?}");
+        assert!((scores[1] - -11.712).abs() < 0.05, "{scores:?}");
+        assert!((scores[2] - -7.037).abs() < 0.05, "{scores:?}");
         // 单独算与批量算一致
         let alone = scorer.score("我今天想去", &["伤害"]).unwrap();
         assert!(
@@ -356,19 +357,39 @@ mod tests {
         assert_eq!(scorer.score_calls(), calls + 3);
     }
 
-    /// 旧 `.qjm` 的 `config.json` 没有修正建议字段：加载成功、打分照常，建议为 `None`（Core 用缺省上限）。
+    /// `config.json` 没有修正建议字段的模型（旧 `.qjm` 都是这样）：加载成功、打分照常，建议为 `None`（Core 用缺省上限）。
+    /// 用随包模型剥掉字段来构造，不依赖随包模型本身带不带这个字段。
     #[test]
     fn a_model_without_the_cap_field_loads_with_the_default() {
+        use crate::qjm;
         use qingjian_core::sentence::SentenceScorer as _;
+        use qingjian_format::Writer;
         let Some(path) = shipped_model() else {
             eprintln!("没有模型文件，跳过");
             return;
         };
-        let scorer = CharScorer::load(&path).unwrap();
+        let container = Container::open(&path, Kind::Model).unwrap();
+        let mut config: serde_json::Value =
+            serde_json::from_slice(container.bytes(qjm::CONFIG_TAG).unwrap()).unwrap();
+        if let Some(obj) = config.as_object_mut() {
+            obj.remove("max_adjustment");
+        }
+        let out_dir = std::env::temp_dir().join("qingjian-neural-tests/nocap");
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let out = out_dir.join("model.qjm");
+        Writer::new(Kind::Model, container.metadata())
+            .unwrap()
+            .section(qjm::CONFIG_TAG, config.to_string().as_bytes())
+            .section(qjm::VOCAB_TAG, container.bytes(qjm::VOCAB_TAG).unwrap())
+            .section(qjm::WEIGHTS_TAG, container.bytes(qjm::WEIGHTS_TAG).unwrap())
+            .write_to(&out)
+            .unwrap();
+        let scorer = CharScorer::load(&out).unwrap();
         assert_eq!(scorer.max_adjustment(), None);
         let scores = scorer.score("我今天想去", &["上海", "吃饭"]).unwrap();
         assert_eq!(scores.len(), 2);
         assert!(scores.iter().all(|s| s.is_finite() && *s < 0.0));
+        let _ = std::fs::remove_dir_all(&out_dir);
     }
 
     /// `config.json` 带修正建议的模型：建议值原样带给 Core。
