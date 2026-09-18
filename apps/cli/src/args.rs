@@ -89,7 +89,7 @@ pub struct Args {
     #[arg(long)]
     pub neural_weight: Option<f64>,
 
-    /// 神经重打分的门槛（nat，缺省不设）：路径分落后最优路径超过这么多的不参与重排
+    /// 神经重打分的门槛（nat，缺省 8）：路径分落后最优路径超过这么多的不参与重排
     #[arg(long)]
     pub neural_margin: Option<f64>,
 
@@ -97,7 +97,7 @@ pub struct Args {
     #[arg(long)]
     pub neural_context: Option<usize>,
 
-    /// 神经重打分单条路径的最大修正（nat，缺省 8）：神经分与静态分差距再大也只挪这么多；模型文件自带建议时缺省跟随它
+    /// 神经重打分单条路径的最大修正（nat，缺省 12）：神经分与静态分差距再大也只挪这么多；模型文件自带建议时缺省跟随它
     #[arg(long)]
     pub neural_max_adjustment: Option<f64>,
 

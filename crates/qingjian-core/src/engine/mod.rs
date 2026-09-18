@@ -316,18 +316,27 @@ const PREDICTION_CANDIDATE_HINTS: usize = 5;
 /// 一次查询最多给壳多少条候选。同音字最多的音节也不到这个数，再往后都是长词，没人会翻到。
 const MAX_CANDIDATES: usize = 500;
 
-/// 神经重打分看 Viterbi 的前几条路径：束宽是 8，再多也没有。
-const RESCORE_PATHS: usize = 6;
+/// 神经重打分看 Viterbi 的前几条路径（16 条比 8 条多救回「你的邮箱」这类池深挡住的翻案，逐句零副作用）。
+const RESCORE_PATHS: usize = 16;
+
+/// 整句候选参与跨切分比较的切分数：排最前的是贪心切分，语言模型时常更认可后面的（`bange` 的 `ban ge`），
+/// 只信第一支会把整句带偏；最多这几支都转一遍按分数挑（格子候选有缓存，多转的只是束搜索）。
+const SENTENCE_SEGMENTATIONS: usize = 4;
+
+/// 跨切分仲裁要对手赢出的分数（nat）：`bange` 这类真歧义的差距在 5 nat 上下，
+/// 而个人 n-gram / 敲错折扣喂出来的差距只有一两 nat——不该推翻 parser 首切，那是用户自己的读法习惯。
+const SENTENCE_ARBITRATION_MARGIN: f64 = 2.5;
 
 /// 神经重打分的缺省权重 λ（见 `Engine::neural_weight`）：整句评测集上 0.5 到 1.0 一样好、0.75 最高（见 docs/notes/neural-rescoring.md），
 /// 取 0.5 给个人 n-gram 留余量；回放里看到的「λ 大整句掉」是那把尺子的偏差。
 pub const NEURAL_WEIGHT: f64 = 0.5;
 
 /// 单条路径允许的最大神经修正（nat），避免模型异常分数一次性压过词频和个人学习。
-pub const NEURAL_MAX_ADJUSTMENT: f64 = 8.0;
+/// 12 比 8 在整句评测上高 0.7 个点（路径集含分歧链后用得上更大的修正），真实日志回放带重排逐条一致。
+pub const NEURAL_MAX_ADJUSTMENT: f64 = 12.0;
 
-/// 神经重打分的缺省门槛（nat）：路径分落后最优路径超过这么多的不参与重排。缺省不设（4 nat 试过没帮助），留作调参的旋钮。
-pub const NEURAL_MARGIN: f64 = f64::INFINITY;
+/// 神经重打分的缺省门槛（nat）：路径分落后最优路径超过这么多的不参与重排。8 在整句评测上与不设限同分（5 会漏掉词库新补词的翻案，差 0.7 个点），重排开销约为不设限的一半。
+pub const NEURAL_MARGIN: f64 = 8.0;
 
 /// 重打分给模型看的前文：本次会话最近上屏的这么多个字符。
 pub const RESCORE_CONTEXT_CHARS: usize = 64;

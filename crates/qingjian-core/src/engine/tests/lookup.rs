@@ -406,3 +406,59 @@ fn option_arrows_move_the_cursor_by_syllable() {
     assert!(engine.move_cursor_syllable_right());
     assert_eq!(engine.composition().cursor(), "hello".len());
 }
+
+/// 跨切分仲裁：`bangexiaoshi` 的贪心首切是 `bang e xiao shi`，语言模型更认可 `ban ge xiao shi`（半个小时），
+/// 对手赢出 足够分数（仲裁门槛以上）时整句改按高分切分出。
+#[test]
+fn sentence_arbitrates_segmentations_when_the_better_one_wins_by_a_margin() {
+    let dictionary = Dictionary::parse(
+        "半个小时\tban ge xiao shi\t5000\n小时\txiao shi\t4000\n棒\tbang\t300\n哦\te\t300\n\
+         小\txiao\t2000\n时\tshi\t2000\n半\tban\t3000\n个\tge\t3000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("bangexiaoshi");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "半个小时");
+
+    let dictionary = Dictionary::parse(
+        "换个\thuan ge\t5000\n换\thuan\t3000\n个\tge\t3000\n黄\thuang\t200\n阿\te\t200\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("huange");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "换个");
+}
+
+/// 分数接近的切分不仲裁（差距不到仲裁门槛）：
+/// parser 首切是「前面音节长」的贪心结果，也是用户被喂惯的读法，小分差不推翻。
+#[test]
+fn sentence_keeps_the_first_segmentation_when_scores_are_close() {
+    // 对手（换个，一条词）只比首切（黄 / 阿 两个单字）高约 2.07 nat（实测：−7.49 对 −9.56），
+    // 不到仲裁门槛（2.5），整句保持首切的读法；余量 ~0.4 nat，改打分常数时这条会先红
+    let dictionary = Dictionary::parse(
+        "黄\thuang\t15000\n阿\te\t15000\n换个\thuan ge\t1000\n换\thuan\t900\n个\tge\t900\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("huange");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "黄阿");
+}
+
+/// 首切的最优路径走了敲错边（`nineng` 按 `nin eng` 切、`eng` 敲错读 `neng`）时不仲裁：
+/// 那是用户自己的读法习惯（个人敲错表在喂它），不该被干净切分的语料统计（`ni neng` → 你能）压掉。
+#[test]
+fn sentence_does_not_arbitrate_away_a_penalized_first_segmentation() {
+    let dictionary = Dictionary::parse(
+        "你\tni\t90000\n能\tneng\t90000\n您\tnin\t900\n嗯\teng\t10\n帮\tbang\t900\n我\two\t900\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("ninengbangwo");
+    let query = engine.query().unwrap();
+    // 实测闸生效时首切 `nin eng` 经 eng→neng 敲错边读出 您能帮我；断言钉死这个行为，
+    // 整句候选整体消失（plain_sentence 返回 None）之类更广的回归也会翻红
+    assert_eq!(query.candidates.items[0].text, "您能帮我");
+}

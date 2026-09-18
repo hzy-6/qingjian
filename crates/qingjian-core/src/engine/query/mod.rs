@@ -464,14 +464,15 @@ impl Engine {
                 }
                 if tail.competes
                     && let Some(full) = first_segmentation(keys)
-                    && let Some(plain) = self.plain_sentence(items, &full, typos)
+                    && let Some(plain) =
+                        self.plain_sentence(items, std::slice::from_ref(&full), typos)
                 {
                     let position = items.len().min(1);
                     items.insert(position, plain);
                 }
             }
             _ => {
-                if let Some(plain) = self.plain_sentence(items, best, typos) {
+                if let Some(plain) = self.plain_sentence(items, segmentations, typos) {
                     let position = leading_english(items);
                     items.insert(position, plain);
                 }
@@ -482,16 +483,60 @@ impl Engine {
     /// 整段拼音的整句候选：最优切分至少两个音节、且最优路径不止一个词时才有（空格上屏的就是它）。
     /// 整段本身就是词库里的词时不重复；有音节没转成字的不算句子。
     /// 词级候选里已有同文本同读音的候选时不出（那条留在词级排序给它的位置），同文本不同读音的从 `items` 里去掉。
+    /// 切分取前几个（[`SENTENCE_SEGMENTATIONS`]）都转一遍，按整句分数挑最好的：
+    /// 排最前的切分是「音节少、前面音节长」的贪心结果（`bange` 的 `bang e`），语言模型常常更认可另一支（`ban ge`）。
     pub(super) fn plain_sentence(
         &self,
         items: &mut Vec<Candidate>,
-        best: &Segmentation,
+        segmentations: &[Segmentation],
         typos: bool,
     ) -> Option<Candidate> {
+        let best = segmentations.first()?;
         if best.syllables.len() < 2 {
             return None;
         }
-        let mut conversion = self.convert_sentence(&best.patterns(), typos)?;
+        // 各切分先按静态分挑赢家（分数差的差距远超神经重排能翻的幅度），赢家路径原地做神经重排。
+        // 只仲裁「全部音节完整、音节数一样」的纯切分歧义（`bange` 的 `bang e` 对 `ban ge`），
+        // 且对手要赢出仲裁门槛才推翻首切：含简拼 / 前缀的切分音节数不同，分数没法比。
+        // 这道闸只护首切：挑战者自己的敲错 / 模糊代价已含在它的分数里，是噪声信道的一部分，不另设防；
+        // 而首切的最优路径若走了敲错 / 模糊边（`nineng` 的 `nin eng`），那是用户自己的读法习惯，
+        // 个人数据喂出来的小分差不该被干净切分的语料统计压掉，直接不仲裁。
+        // 首切转换失败理论上几乎不可达（词图对查不到的音节有占位兜底），失败就当这段没有整句。
+        // 各切分的路径集直接复用给赢家做重排，省一次重复光束搜索。
+        let mut winner: Option<(&Segmentation, Vec<Conversion>)> = None;
+        let mut arbitrable = false;
+        for segmentation in segmentations.iter().take(SENTENCE_SEGMENTATIONS) {
+            if segmentation.syllables.len() < 2 {
+                continue;
+            }
+            let Some(paths) = self.convert_sentence_paths(&segmentation.patterns(), typos, false)
+            else {
+                continue;
+            };
+            match &winner {
+                None => {
+                    arbitrable = segmentation.incomplete_count() == 0 && !paths[0].altered();
+                    winner = Some((segmentation, paths));
+                }
+                Some((current_seg, current_paths))
+                    if arbitrable
+                        && segmentation.incomplete_count() == 0
+                        && segmentation.syllables.len() == current_seg.syllables.len()
+                        && paths[0].score > current_paths[0].score + SENTENCE_ARBITRATION_MARGIN =>
+                {
+                    winner = Some((segmentation, paths));
+                }
+                _ => {}
+            }
+        }
+        let (best, mut paths) = winner?;
+        // 与最优路径差得太远的不参与重排（重排只在接了打分器时发生，paths 长度大于 1 也只在那时出现）
+        if paths.len() > 1 {
+            let floor = paths[0].score - self.neural_margin;
+            paths.retain(|p| p.score >= floor);
+            self.rescore_paths(&mut paths);
+        }
+        let mut conversion = paths.into_iter().next()?;
         // 不按原样读的路径（敲错边 / 模糊音）不许压过「敲的拼音本身就是一个词」：`jineng` 按 `jin eng` 切时
         // 词图里没有 技能，敲错边读出 近藤；`ceshi` 读出 的是。词级候选里有音节正好拼成整段输入的词时退回原样的路径
         if conversion.altered() {
@@ -553,6 +598,24 @@ impl Engine {
         typos: bool,
         whole: bool,
     ) -> Option<Conversion> {
+        let mut paths = self.convert_sentence_paths(patterns, typos, whole)?;
+        // 与最优路径差得太远的不参与：那种差距多半是个人 n-gram 拉开的
+        if paths.len() > 1 {
+            let floor = paths[0].score - self.neural_margin;
+            paths.retain(|p| p.score >= floor);
+            self.rescore_paths(&mut paths);
+        }
+        paths.into_iter().next()
+    }
+
+    /// 整句转换的候选路径集（不做神经重排）：接了打分器时取前 [`RESCORE_PATHS`] 条，
+    /// 给 [`Self::plain_sentence`] 在赢家路径上原地重排用（省一次重复光束搜索）。
+    fn convert_sentence_paths(
+        &self,
+        patterns: &[qingjian_dictionary::SyllablePattern<'_>],
+        typos: bool,
+        whole: bool,
+    ) -> Option<Vec<Conversion>> {
         let dictionaries = self.all_dictionaries();
         let expanded = self.expand_positions(patterns, typos);
         let k = if self.has_sentence_scorer() {
@@ -560,7 +623,7 @@ impl Engine {
         } else {
             1
         };
-        let mut paths = sentence::convert_paths(
+        let paths = sentence::convert_paths(
             &dictionaries,
             &expanded.positions(),
             whole,
@@ -571,13 +634,7 @@ impl Engine {
             |index, syllable| expanded.cost(index, syllable),
             &mut self.span_cache.borrow_mut(),
         );
-        // 与最优路径差得太远的不参与：那种差距多半是个人 n-gram 拉开的
-        if paths.len() > 1 {
-            let floor = paths[0].score - self.neural_margin;
-            paths.retain(|p| p.score >= floor);
-            self.rescore_paths(&mut paths);
-        }
-        paths.into_iter().next()
+        (!paths.is_empty()).then_some(paths)
     }
 
     /// 每个位置的写法：敲的原样、模糊音，再加音节级敲错变体（`correction::typo`）当带代价的边，

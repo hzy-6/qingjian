@@ -35,6 +35,17 @@ struct Node {
     /// 前驱在 `nodes[start]` 里的下标；`start == 0` 时无意义。
     back: usize,
 
+    /// 次优前驱的下标与它的累计分（多数位置与最优同一条，末位分歧路径用）：
+    /// 只按结尾词取 k 条时，前几名常是同一主干只换最后一个字的近重复，
+    /// 神经重排真正需要的「前缀不同」的那条（雨下得 vs 余下的）恰恰排不进来，这里补一条。
+    back2: usize,
+    score2: f64,
+    static_score2: f64,
+    penalty2: f64,
+
+    /// 这个词自己的兜底 log 概率（词库词频算的），分歧路径重算后缀转移分时用。
+    fallback: f64,
+
     /// 是占位音节。
     placeholder: bool,
 
@@ -170,6 +181,11 @@ pub fn convert_paths(
         score: 0.0,
         static_score: 0.0,
         back: 0,
+        back2: 0,
+        score2: 0.0,
+        static_score2: 0.0,
+        penalty2: 0.0,
+        fallback: 0.0,
         placeholder: false,
         penalty: 0.0,
     });
@@ -191,7 +207,7 @@ pub fn convert_paths(
             for hit in hits.iter() {
                 let bonus = weight_bonus(weight(&hit.text));
                 let fallback = fallback_log_prob(hit.frequency, log_total);
-                let (score, back) =
+                let ((score, back), (score2, back2)) =
                     best_predecessor(&nodes, start, &hit.text, model, personal, fallback);
                 let previous = &nodes[start][back];
                 let penalty = previous.penalty + hit.penalty;
@@ -199,6 +215,17 @@ pub fn convert_paths(
                     .log_prob((start > 0).then_some(previous.text.as_str()), &hit.text)
                     .unwrap_or(fallback);
                 let static_score = previous.static_score + static_step;
+                let (previous2_penalty, previous2_static, static_step2) = {
+                    let previous2 = &nodes[start][back2];
+                    (
+                        previous2.penalty,
+                        previous2.static_score,
+                        model
+                            .log_prob((start > 0).then_some(previous2.text.as_str()), &hit.text)
+                            .unwrap_or(fallback),
+                    )
+                };
+                let static_score2 = previous2_static + static_step2;
                 nodes[end].push(Node {
                     start,
                     text: hit.text.clone(),
@@ -206,6 +233,11 @@ pub fn convert_paths(
                     score: score + bonus - hit.penalty,
                     static_score,
                     back,
+                    back2,
+                    score2: score2 + bonus - hit.penalty,
+                    static_score2,
+                    penalty2: previous2_penalty + hit.penalty,
+                    fallback,
                     placeholder: false,
                     penalty,
                 });
@@ -214,7 +246,7 @@ pub fn convert_paths(
         // 这个音节连单字都查不到：用音节本身占位，别让整句断掉
         if !any {
             let text = positions[start][0].text;
-            let (score, back) = best_predecessor(
+            let ((score, back), _) = best_predecessor(
                 &nodes,
                 start,
                 text,
@@ -231,18 +263,54 @@ pub fn convert_paths(
                 score,
                 static_score,
                 back,
+                back2: back,
+                score2: score,
+                static_score2: static_score,
+                penalty2: penalty,
+                fallback: UNKNOWN_LOG_PROB,
                 placeholder: true,
                 penalty,
             });
         }
     }
     prune(&mut nodes[n]);
-    let mut paths: Vec<Conversion> = Vec::with_capacity(k.min(nodes[n].len()));
-    for index in 0..nodes[n].len() {
+    // 候选 = 每个结尾词的最优链，再加链上任意节点换次优前驱的分歧链：
+    // 只取最优链时前 k 条全是同一主干只换最后一个字的近重复，重排器无案可翻；
+    // 分歧只在末位还够不着中段的单字之争（`需要[再|在]研究`、`应该[坐|做]几路`），所以链上每个节点都试。
+    let mut endings: Vec<usize> = (0..nodes[n].len()).collect();
+    endings.sort_by(|&a, &b| {
+        nodes[n][b]
+            .score
+            .partial_cmp(&nodes[n][a].score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    // 分歧候选只在 k > 1（接了重排器）时生成：它们把束宽剪掉的路径按全分复活，
+    // 自己当首选不如束内最优稳（真实回放 -1.6 个点），交给重排器再判才有净收益。
+    let mut candidates: Vec<Conversion> = Vec::new();
+    for &index in &endings {
+        candidates.push(backtrack(&nodes, n, index));
+    }
+    if k > 1 {
+        for &index in &endings {
+            let chain = best_chain_indices(&nodes, n, index);
+            for depth in 1..chain.len() {
+                if let Some(conversion) = diverged(&nodes, &chain, depth, model, personal, &weight)
+                {
+                    candidates.push(conversion);
+                }
+            }
+        }
+    }
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut paths: Vec<Conversion> = Vec::with_capacity(k.min(candidates.len()));
+    for conversion in candidates {
         if paths.len() >= k {
             break;
         }
-        let conversion = backtrack(&nodes, n, index);
         if !paths.iter().any(|p| p.text == conversion.text) {
             paths.push(conversion);
         }
@@ -250,11 +318,105 @@ pub fn convert_paths(
     paths
 }
 
-/// 从 `nodes[position][index]` 回溯出整条路径。
+/// `nodes[position][index]` 的最优链，从头到尾的 (位置, 节点下标)。
+fn best_chain_indices(
+    nodes: &[Vec<Node>],
+    mut position: usize,
+    mut index: usize,
+) -> Vec<(usize, usize)> {
+    let mut chain = Vec::new();
+    while position > 0 {
+        chain.push((position, index));
+        let node = &nodes[position][index];
+        position = node.start;
+        index = node.back;
+    }
+    chain.push((position, index));
+    chain.reverse();
+    chain
+}
+
+/// 链上第 `depth` 个节点换成它的次优前驱后的整条路径：
+/// 前缀取次优前驱自己的最优链，后缀沿用原链的词，但前词变了、转移分要逐词重算。
+fn diverged(
+    nodes: &[Vec<Node>],
+    chain: &[(usize, usize)],
+    depth: usize,
+    model: &dyn LanguageModel,
+    personal: Personal<'_>,
+    weight: &impl Fn(&str) -> u32,
+) -> Option<Conversion> {
+    let (position, index) = chain.get(depth).copied()?;
+    let node = &nodes[position].get(index)?;
+    if node.back2 == node.back {
+        return None;
+    }
+    let mut head = backtrack(nodes, node.start, node.back2);
+    let mut words = std::mem::take(&mut head.words);
+    let mut score = node.score2;
+    let mut static_score = node.static_score2;
+    let mut penalty = node.penalty2;
+    let mut previous = words.last().map(|w| w.text.clone());
+    words.push(SentenceWord {
+        text: node.text.clone(),
+        syllables: node.syllables.clone(),
+        placeholder: node.placeholder,
+    });
+    for (j, &(dpos, didx)) in chain[depth + 1..].iter().enumerate() {
+        // 占位音节在 DP 里走 NoModel + Personal::NONE，这里用真模型重算结果相同
+        //（模型对拼音串返回 None → 同一兜底分，personal 对非汉字计 0）；个人表混入非汉字时两处要一起改
+        let word = &nodes[dpos][didx];
+        // 个人三元的 earlier 与 DP 同口径：取链上前驱自己的回指词（DP 的近似上下文）。
+        // 用复活链的实际词会让复活路径拿到比 DP 更「顺」的个人上下文而系统性虚高（真实回放 -1.6 个点的根源）
+        let (ppos, pidx) = chain[depth + j];
+        let parent = &nodes[ppos][pidx];
+        let dp_earlier = if ppos > 0 {
+            Some(nodes[parent.start][parent.back].text.clone())
+        } else {
+            None
+        };
+        let context = Context {
+            previous: previous.as_deref(),
+            earlier: dp_earlier.as_deref(),
+        };
+        score += transition_log_prob(model, personal, context, &word.text, word.fallback)
+            + weight_bonus(weight(&word.text));
+        static_score += model
+            .log_prob(previous.as_deref(), &word.text)
+            .unwrap_or(word.fallback);
+        // 词自己的代价 = 它的总罚 − 链上前驱的总罚（代价只来自词本身，与走哪条前缀无关）；
+        // 分数与罚都要走这份增量：分数漏扣会让带敲错 / 模糊边的分歧候选虚高
+        let (ppos, pidx) = chain[depth + j];
+        let delta = word.penalty - nodes[ppos][pidx].penalty;
+        penalty += delta;
+        score -= delta;
+        previous = Some(word.text.clone());
+        words.push(SentenceWord {
+            text: word.text.clone(),
+            syllables: word.syllables.clone(),
+            placeholder: word.placeholder,
+        });
+    }
+    let mut text = String::new();
+    let mut syllables = Vec::new();
+    for word in &words {
+        text.push_str(&word.text);
+        syllables.extend(word.syllables.iter().cloned());
+    }
+    Some(Conversion {
+        text,
+        syllables,
+        words,
+        score,
+        static_score,
+        penalty,
+    })
+}
+
+/// 从 `nodes[position][index]` 沿最优前驱回溯出整条路径。
 fn backtrack(nodes: &[Vec<Node>], mut position: usize, mut index: usize) -> Conversion {
-    let score = nodes[position][index].score;
-    let static_score = nodes[position][index].static_score;
-    let penalty = nodes[position][index].penalty;
+    let node = &nodes[position][index];
+    let (score, static_score, penalty) = (node.score, node.static_score, node.penalty);
     let mut words: Vec<SentenceWord> = Vec::new();
     while position > 0 {
         let node = &nodes[position][index];
@@ -344,7 +506,7 @@ fn span_candidates(
         .collect()
 }
 
-/// 在 `nodes[start]` 的前驱里挑让 `word` 得分最高的那条，返回 (累计得分, 前驱下标)。
+/// 在 `nodes[start]` 的前驱里挑让 `word` 得分最高的两条，返回 ((最优分, 下标), (次优分, 下标))。
 /// 转移概率先问静态模型（不认识就用词库兜底值），再与个人 n-gram 插值；前二词是前驱自己的前驱（回指）。
 fn best_predecessor(
     nodes: &[Vec<Node>],
@@ -353,8 +515,9 @@ fn best_predecessor(
     model: &dyn LanguageModel,
     personal: Personal<'_>,
     fallback: f64,
-) -> (f64, usize) {
+) -> ((f64, usize), (f64, usize)) {
     let mut best = (f64::NEG_INFINITY, 0);
+    let mut second = (f64::NEG_INFINITY, 0);
     for (index, previous) in nodes[start].iter().enumerate() {
         let context = if start == 0 {
             Context::START
@@ -367,10 +530,16 @@ fn best_predecessor(
         };
         let score = previous.score + transition_log_prob(model, personal, context, word, fallback);
         if score > best.0 {
+            second = best;
             best = (score, index);
+        } else if score > second.0 {
+            second = (score, index);
         }
     }
-    best
+    if second.0 == f64::NEG_INFINITY {
+        second = best;
+    }
+    (best, second)
 }
 
 /// 按得分降序只留束宽条。
@@ -386,7 +555,7 @@ fn prune(nodes: &mut Vec<Node>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sentence::{NoLanguageModel, UserNgram};
+    use crate::sentence::{FALLBACK_PENALTY, NoLanguageModel, UserNgram};
 
     const SAMPLE: &str = "我\two\t900000\n想\txiang\t500000\n去\tqu\t400000\n吃\tchi\t300000\n饭\tfan\t200000\n\
         吃饭\tchi fan\t100000\n我想\two xiang\t600000\n翔\txiang\t3000\n区\tqu\t100000\n卧\two\t2000\n\
@@ -703,5 +872,229 @@ mod tests {
         let conversion = run(with_typo("xie"));
         assert_eq!(conversion.text, "感谢");
         assert_eq!(conversion.penalty, 0.0);
+    }
+
+    /// 中段分歧路径：`xuyaozaiyanjiuyixia` 的最优链在研究前选了高频的 在，
+    /// 次优的 再 是研究节点的次优前驱——分歧不在末位也要进得了候选，重排器才有案可翻。
+    #[test]
+    fn paths_include_mid_chain_divergence() {
+        let dictionary = Dictionary::parse(
+        "需要\txu yao\t90000\n在\tzai\t90000\n再\tzai\t30000\n研究\tyan jiu\t80000\n一下\tyi xia\t70000\n",
+    )
+    .unwrap();
+        let patterns = complete(&["xu", "yao", "zai", "yan", "jiu", "yi", "xia"]);
+        let paths = convert_paths(
+            &[&dictionary],
+            &patterns,
+            false,
+            8,
+            &NoLanguageModel,
+            Personal::NONE,
+            |_| 0,
+            |_, _| 0.0,
+            &mut SpanCache::default(),
+        );
+        assert_eq!(paths[0].text, "需要在研究一下");
+        assert!(
+            paths.iter().any(|p| p.text == "需要再研究一下"),
+            "paths: {:?}",
+            paths.iter().map(|p| p.text.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    /// 带代价边的对拍：分歧候选的后缀含敲错 / 模糊边命中时，重算的分数必须把这些代价都扣掉。
+    /// 不变量（NoModel、无个人、无用户加分）：每条候选 score + penalty == 各词兜底分之和。
+    /// 这里曾漏扣后缀词代价（`大打关系` 的分歧在 打 处、后缀 关系 带 0.7 罚，分数虚高恰好 0.7），用这条钉住。
+    #[test]
+    fn diverged_candidates_carry_their_suffix_penalties() {
+        let dictionary = Dictionary::parse(
+        "想\txiang\t50000\n向\txiang\t40000\n大\tda\t30000\n打\tda\t40000\n关系\tguan xi\t300000\n干\tgan\t20000\n洗\txi\t10000\n吧\tba\t80000\n",
+    )
+    .unwrap();
+        let log_total = (dictionary.total_frequency() as f64).max(1.0).ln();
+        let patterns = vec![
+            vec![SyllablePattern::complete("xiang")],
+            vec![SyllablePattern::complete("da")],
+            vec![
+                SyllablePattern::complete("gan"),
+                SyllablePattern::complete("guan"),
+            ],
+            vec![SyllablePattern::complete("xi")],
+            vec![SyllablePattern::complete("ba")],
+        ];
+        let paths = convert_paths(
+            &[&dictionary],
+            &patterns,
+            false,
+            16,
+            &NoLanguageModel,
+            Personal::NONE,
+            |_| 0,
+            |index, syllable| match (index, syllable) {
+                (2, "guan") => 0.7,
+                _ => 0.0,
+            },
+            &mut SpanCache::default(),
+        );
+        // 先确认用例真的产出了后缀带代价的分歧候选（打 处分歧 → 头换 大，后缀 关系 带 0.7 罚），别让断言空转
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.text == "向打关系吧" && p.penalty > 0.0),
+            "paths: {:?}",
+            paths
+                .iter()
+                .map(|p| (p.text.clone(), p.penalty))
+                .collect::<Vec<_>>()
+        );
+        for path in &paths {
+            let expected: f64 = path
+                .words
+                .iter()
+                .map(|w| {
+                    let freq = dictionary
+                        .lookup_exact(
+                            &w.syllables
+                                .iter()
+                                .map(|s| SyllablePattern::complete(s.as_str()))
+                                .collect::<Vec<_>>(),
+                        )
+                        .iter()
+                        .find(|m| m.text == w.text)
+                        .map(|m| m.frequency)
+                        .unwrap_or(0);
+                    (f64::from(freq) + 1.0).ln() - log_total + FALLBACK_PENALTY
+                })
+                .sum();
+            assert!(
+                ((path.score + path.penalty) - expected).abs() < 1e-9,
+                "{}: score {} + penalty {} != {}",
+                path.text,
+                path.score,
+                path.penalty,
+                expected
+            );
+        }
+    }
+
+    /// 穷举对拍：小词典上暴力枚举全部词路径的最大分，必须与 convert_paths 的最优一致；
+    /// 分歧候选的重算分数若虚高（越过真最优），这里会红。
+    #[test]
+    fn diverged_candidates_never_beat_the_viterbi_best() {
+        let dictionary = Dictionary::parse(
+        "那\tna\t90000\n哪\tna\t30000\n一\tyi\t80000\n了\tle\t70000\n一类\tyi lei\t20000\n做\tzuo\t80000\n坐\tzuo\t40000\n了\tle\t70000\n个\tge\t80000\n歪\twai\t3000\n瓜\tgua\t5000\n外观\twai gua\t6000\n做了\tzuo le\t40000\n",
+    )
+    .unwrap();
+        for syllables in [
+            vec!["na", "yi", "lei"],
+            vec!["zuo", "le", "ge", "wai", "gua"],
+        ] {
+            let patterns = complete(&syllables);
+            let paths = convert_paths(
+                &[&dictionary],
+                &patterns,
+                false,
+                16,
+                &NoLanguageModel,
+                Personal::NONE,
+                |_| 0,
+                |_, _| 0.0,
+                &mut SpanCache::default(),
+            );
+            // 穷举：全切分（这里音节数 ≤ 5，词 ≤ 3 音节，直接 DFS）
+            let total = fallback_total(&dictionary);
+            let best = exhaustive_best(&dictionary, &patterns, total);
+            assert!(
+                (paths[0].score - best.1).abs() < 1e-9 && paths[0].text == best.0,
+                "syllables {syllables:?}: viterbi best {:?}({}) vs exhaustive {:?}({})",
+                paths[0].text,
+                paths[0].score,
+                best.0,
+                best.1
+            );
+        }
+    }
+
+    fn fallback_total(dictionary: &Dictionary) -> f64 {
+        (dictionary.total_frequency() as f64).max(1.0).ln()
+    }
+
+    /// DFS 全部词路径，返回 (文本, 分)。分与 convert_paths 同式：每词 fallback + weight_bonus(0)。
+    fn exhaustive_best(
+        dictionary: &Dictionary,
+        patterns: &[std::vec::Vec<qingjian_dictionary::SyllablePattern<'_>>],
+        total: f64,
+    ) -> (String, f64) {
+        fn walk(
+            dictionary: &Dictionary,
+            patterns: &[std::vec::Vec<qingjian_dictionary::SyllablePattern<'_>>],
+            start: usize,
+            total: f64,
+            text: &mut String,
+            score: &mut f64,
+            best: &mut (String, f64),
+        ) {
+            if start == patterns.len() {
+                if *score > best.1 {
+                    *best = (text.clone(), *score);
+                }
+                return;
+            }
+            for end in start + 1..=patterns.len() {
+                let span = &patterns[start..end];
+                let pattern: Vec<qingjian_dictionary::SyllablePattern<'_>> = span
+                    .iter()
+                    .map(|p| *p.first().expect("span 非空"))
+                    .collect();
+                for hit in dictionary.lookup_exact(&pattern) {
+                    if !hit.exact {
+                        continue;
+                    }
+                    let bytes = text.len();
+                    text.push_str(hit.text);
+                    let step = (f64::from(hit.frequency) + 1.0).ln() - total + FALLBACK_PENALTY;
+                    *score += step;
+                    walk(dictionary, patterns, end, total, text, score, best);
+                    *score -= step;
+                    text.truncate(bytes);
+                }
+            }
+        }
+        let mut best = (String::new(), f64::NEG_INFINITY);
+        let mut text = String::new();
+        let mut score = 0.0;
+        walk(
+            dictionary, patterns, 0, total, &mut text, &mut score, &mut best,
+        );
+        best
+    }
+
+    /// 末位分歧路径：同一结尾词的最优前驱与次优前驱各出一条。只取最优链时，
+    /// `waimiandeyu…` 的前 k 条全是 `余下的很大 / 很搭 / 很打` 这类只变末字的近重复，
+    /// 排在后面但前缀不同的 `雨下得很大` 进不了重排候选。
+    #[test]
+    fn paths_include_the_second_best_predecessor_of_the_best_ending() {
+        let dictionary = Dictionary::parse(
+        "我\two\t900000\n想\txiang\t500000\n我想\two xiang\t600000\n去\tqu\t400000\n区\tqu\t3000\n吃饭\tchi fan\t100000\n",
+    )
+    .unwrap();
+        let patterns = complete(&["wo", "xiang", "qu", "chi", "fan"]);
+        let paths = convert_paths(
+            &[&dictionary],
+            &patterns,
+            false,
+            3,
+            &NoLanguageModel,
+            Personal::NONE,
+            |_| 0,
+            |_, _| 0.0,
+            &mut SpanCache::default(),
+        );
+        assert_eq!(paths[0].text, "我想去吃饭");
+        assert!(
+            paths.iter().any(|p| p.text == "我想区吃饭"),
+            "paths: {:?}",
+            paths.iter().map(|p| p.text.clone()).collect::<Vec<_>>()
+        );
     }
 }

@@ -25,6 +25,8 @@ pub struct TypoCosts {
 
     /// 整段一处编辑的纠错代价：纠正后的整句得分要比原样转出的高出这么多才纠。
     /// 相当于「敲错一个键」的先验约 1/150；原样是合法简拼（`nhao` → 你好）时两边路径一样，纠正不会赢。
+    /// 双错纠错的两份代价 + 第二处加罚也用这个数，6 是整句评测与真实回放扫出来的平衡点：
+    /// 5 会让两处纠错把说通的句子改坏（`yishunjian` → 艺术家），8 开始真实敲错纠不动。
     pub correction_penalty: f64,
 
     /// 双错联合纠错里第二处编辑的额外代价：连着敲错两处的先验远低于一处，
@@ -44,7 +46,7 @@ impl TypoCosts {
         extra: 5.5,
         missing: 5.5,
         discount_cap: 3.0,
-        correction_penalty: 5.0,
+        correction_penalty: 6.0,
         second_correction_penalty: 3.0,
         double_error_margin: 2.0,
     };
