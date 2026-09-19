@@ -99,6 +99,8 @@ fn collect(
 }
 
 /// 评一句：清空引擎状态、写入上文、喂拼音、看候选。
+/// 上文只喂 Qwen(经 history):静态 bigram 是按句切分统计的,跨句左词是分布外输入,
+/// 实测喂给静态反而 −0.5 个点(895 句混域尺),`Context::START` 就是正确的边界先验。
 fn evaluate(engine: &mut Engine, pair: &Pair, report: &mut Report, show_misses: usize) {
     report.total += 1;
     engine.clear();

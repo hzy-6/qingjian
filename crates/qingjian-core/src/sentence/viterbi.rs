@@ -121,6 +121,8 @@ pub fn convert_with(
         positions,
         keep_partial,
         1,
+        SPAN_CANDIDATES,
+        Context::START,
         model,
         personal,
         weight,
@@ -132,12 +134,17 @@ pub fn convert_with(
 }
 
 /// 得分最高的前 `k` 条路径（最多束宽条，按得分降序，文本相同的只留一条）：给重打分用。
+/// `span_width` 是每个格子收多少候选词（宽格子让低频字词——「拂」在 fu 格第 7——也进词图，交给神经重排分辨；
+/// 缓存键带宽度，两种宽度互不污染）。`start` 是句首的左侧上下文（真实上文的末词；评测与裸调用给
+/// [`Context::START`]），第一个词的静态转移与个人 n-gram 按它算,不再默认句首。
 #[allow(clippy::too_many_arguments)]
 pub fn convert_paths(
     dictionaries: &[&Dictionary],
     positions: &[Vec<SyllablePattern<'_>>],
     keep_partial: bool,
     k: usize,
+    span_width: usize,
+    start_context: Context<'_>,
     model: &dyn LanguageModel,
     personal: Personal<'_>,
     weight: impl Fn(&str) -> u32,
@@ -165,6 +172,8 @@ pub fn convert_paths(
     if n == 0 || k == 0 {
         return Vec::new();
     }
+    // 句首左侧上下文;循环里 start 是下标,先拷出来用
+    let start_ctx = start_context;
     let total: f64 = dictionaries
         .iter()
         .map(|d| d.total_frequency() as f64)
@@ -197,8 +206,17 @@ pub fn convert_paths(
         let mut any = false;
         for end in start + 1..=n.min(start + MAX_WORD_SYLLABLES) {
             let span = &positions[start..end];
-            let hits = cache.get_or_insert_with(SpanCache::key(span), || {
-                span_candidates(dictionaries, span, start, personal, &weight, &cost)
+            let cache_key = format!("{}\u{1}{span_width}", SpanCache::key(span));
+            let hits = cache.get_or_insert_with(cache_key, || {
+                span_candidates(
+                    dictionaries,
+                    span,
+                    start,
+                    span_width,
+                    personal,
+                    &weight,
+                    &cost,
+                )
             });
             if hits.is_empty() {
                 continue;
@@ -207,12 +225,21 @@ pub fn convert_paths(
             for hit in hits.iter() {
                 let bonus = weight_bonus(weight(&hit.text));
                 let fallback = fallback_log_prob(hit.frequency, log_total);
-                let ((score, back), (score2, back2)) =
-                    best_predecessor(&nodes, start, &hit.text, model, personal, fallback);
+                let ((score, back), (score2, back2)) = best_predecessor(
+                    &nodes, start, &hit.text, model, personal, fallback, start_ctx,
+                );
                 let previous = &nodes[start][back];
                 let penalty = previous.penalty + hit.penalty;
+                // 静态首词的转移也按真实左文(有则用之),与 score 的口径一致
                 let static_step = model
-                    .log_prob((start > 0).then_some(previous.text.as_str()), &hit.text)
+                    .log_prob(
+                        if start > 0 {
+                            Some(previous.text.as_str())
+                        } else {
+                            start_ctx.previous
+                        },
+                        &hit.text,
+                    )
                     .unwrap_or(fallback);
                 let static_score = previous.static_score + static_step;
                 let (previous2_penalty, previous2_static, static_step2) = {
@@ -221,7 +248,14 @@ pub fn convert_paths(
                         previous2.penalty,
                         previous2.static_score,
                         model
-                            .log_prob((start > 0).then_some(previous2.text.as_str()), &hit.text)
+                            .log_prob(
+                                if start > 0 {
+                                    Some(previous2.text.as_str())
+                                } else {
+                                    start_ctx.previous
+                                },
+                                &hit.text,
+                            )
                             .unwrap_or(fallback),
                     )
                 };
@@ -253,6 +287,7 @@ pub fn convert_paths(
                 &NoModel,
                 Personal::NONE,
                 UNKNOWN_LOG_PROB,
+                start_ctx,
             );
             let penalty = nodes[start][back].penalty;
             let static_score = nodes[start][back].static_score + UNKNOWN_LOG_PROB;
@@ -462,6 +497,7 @@ fn span_candidates(
     dictionaries: &[&Dictionary],
     span: &[Vec<SyllablePattern<'_>>],
     start: usize,
+    limit: usize,
     personal: Personal<'_>,
     weight: &impl Fn(&str) -> u32,
     cost: &impl Fn(usize, &str) -> f64,
@@ -493,7 +529,7 @@ fn span_candidates(
     scored.truncate(if abbreviated {
         ABBREVIATED_SPAN_CANDIDATES
     } else {
-        SPAN_CANDIDATES
+        limit
     });
     scored
         .into_iter()
@@ -515,12 +551,13 @@ fn best_predecessor(
     model: &dyn LanguageModel,
     personal: Personal<'_>,
     fallback: f64,
+    start_ctx: Context<'_>,
 ) -> ((f64, usize), (f64, usize)) {
     let mut best = (f64::NEG_INFINITY, 0);
     let mut second = (f64::NEG_INFINITY, 0);
     for (index, previous) in nodes[start].iter().enumerate() {
         let context = if start == 0 {
-            Context::START
+            start_ctx
         } else {
             Context {
                 previous: Some(previous.text.as_str()),
@@ -888,6 +925,8 @@ mod tests {
             &patterns,
             false,
             8,
+            SPAN_CANDIDATES,
+            Context::START,
             &NoLanguageModel,
             Personal::NONE,
             |_| 0,
@@ -927,6 +966,8 @@ mod tests {
             &patterns,
             false,
             16,
+            SPAN_CANDIDATES,
+            Context::START,
             &NoLanguageModel,
             Personal::NONE,
             |_| 0,
@@ -995,6 +1036,8 @@ mod tests {
                 &patterns,
                 false,
                 16,
+                SPAN_CANDIDATES,
+                Context::START,
                 &NoLanguageModel,
                 Personal::NONE,
                 |_| 0,
@@ -1084,6 +1127,8 @@ mod tests {
             &patterns,
             false,
             3,
+            SPAN_CANDIDATES,
+            Context::START,
             &NoLanguageModel,
             Personal::NONE,
             |_| 0,

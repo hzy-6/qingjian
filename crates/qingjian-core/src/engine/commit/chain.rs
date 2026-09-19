@@ -83,6 +83,17 @@ impl CommitChain {
         self.buffer_words.clear();
     }
 
+    /// 把链的「上一个词」设成外部给的文本(评测注入真实上文用):不进 buffer_words、不算同段拼音,
+    /// 只让下一个词的静态转移与个人 n-gram 拿到真前词,而不是句首标记。
+    pub fn seed(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.previous = Some((text.to_owned(), Vec::new()));
+        self.earlier = None;
+        self.same_buffer = false;
+    }
+
     /// 缓冲区被清空或整段被别的东西吃掉：链不断，但下一个词不算同一段拼音。
     pub fn leave_buffer(&mut self) {
         self.same_buffer = false;

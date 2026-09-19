@@ -522,7 +522,8 @@ impl Engine {
                     if arbitrable
                         && segmentation.incomplete_count() == 0
                         && segmentation.syllables.len() == current_seg.syllables.len()
-                        && paths[0].score > current_paths[0].score + SENTENCE_ARBITRATION_MARGIN =>
+                        && paths[0].score
+                            > current_paths[0].score + SENTENCE_ARBITRATION_MARGIN =>
                 {
                     winner = Some((segmentation, paths));
                 }
@@ -618,16 +619,21 @@ impl Engine {
     ) -> Option<Vec<Conversion>> {
         let dictionaries = self.all_dictionaries();
         let expanded = self.expand_positions(patterns, typos);
-        let k = if self.has_sentence_scorer() {
-            RESCORE_PATHS
-        } else {
-            1
-        };
+        let rescored = self.has_sentence_scorer();
+        let k = if rescored { self.neural_paths } else { 1 };
         let paths = sentence::convert_paths(
             &dictionaries,
             &expanded.positions(),
             whole,
             k,
+            // 格子宽度试过接重排器时放宽到 10(让「拂」这类第 7-10 名的字进词图):净伤害 1.4 个点——
+            // 多出来的低频路径把 k=16 的池挤爆,厨师/火候、直播带货 反而被顶出去,轻拂的根因也证明不在格子
+            // (词图本就有它,k=64 全开也翻不了,是模型对单字拆分的偏好)。参数与缓存键的宽度支持保留作实验口。
+            sentence::SPAN_CANDIDATES,
+            // 句首左文:试过喂 chain.context()(连打时句内左文进静态)——895 句尺 −0.3、回放 −5 句,
+            // Qwen 已带 128 字上下文,静态侧再叠加只搅动路径池,无净收益;退回句首标记。
+            // start_context 参数与 Engine::seed_chain 保留作实验口(静态独走/换更语言模型时重评)。
+            sentence::Context::START,
             &*self.language_model,
             self.personal(),
             |text| self.learner.weight(text),

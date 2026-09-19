@@ -149,6 +149,12 @@ pub struct Engine {
     /// 用户配置的单条路径最大神经修正（nat），见 [`Self::set_neural_max_adjustment`]；`None` 跟随模型建议。
     neural_max_adjustment: Option<f64>,
 
+    /// 个人证据保护闸的倍率（见 [`NEURAL_GATE`] 与 [`Self::set_neural_gate`]）：神经翻案所需的分差相对守成路径个人证据优势的倍数，0 不保护。
+    neural_gate: f64,
+
+    /// 神经重打分看 Viterbi 的前几条路径（缺省 [`RESCORE_PATHS`]），见 [`Self::set_neural_paths`]。
+    neural_paths: usize,
+
     /// 模型文件建议的单条路径最大神经修正（nat），接打分器时从 [`SentenceScorer::max_adjustment`] 读一次；旧模型 `None`。
     model_max_adjustment: Option<f64>,
 
@@ -316,8 +322,10 @@ const PREDICTION_CANDIDATE_HINTS: usize = 5;
 /// 一次查询最多给壳多少条候选。同音字最多的音节也不到这个数，再往后都是长词，没人会翻到。
 const MAX_CANDIDATES: usize = 500;
 
-/// 神经重打分看 Viterbi 的前几条路径（16 条比 8 条多救回「你的邮箱」这类池深挡住的翻案，逐句零副作用）。
-const RESCORE_PATHS: usize = 16;
+/// 神经重打分看 Viterbi 的前几条路径（16 条比 8 条多救回「你的邮箱」这类池深挡住的翻案，逐句零副作用）；
+/// 接了打分器时的缺省，`Engine::set_neural_paths` / CLI `--neural-paths` 可改（A/B 用；margin 与 k 要联扫，
+/// 见 docs/notes/qwen-rescoring.md）。
+pub const RESCORE_PATHS: usize = 16;
 
 /// 整句候选参与跨切分比较的切分数：排最前的是贪心切分，语言模型时常更认可后面的（`bange` 的 `ban ge`），
 /// 只信第一支会把整句带偏；最多这几支都转一遍按分数挑（格子候选有缓存，多转的只是束搜索）。
@@ -335,11 +343,20 @@ pub const NEURAL_WEIGHT: f64 = 0.5;
 /// 12 比 8 在整句评测上高 0.7 个点（路径集含分歧链后用得上更大的修正），真实日志回放带重排逐条一致。
 pub const NEURAL_MAX_ADJUSTMENT: f64 = 12.0;
 
-/// 神经重打分的缺省门槛（nat）：路径分落后最优路径超过这么多的不参与重排。8 在整句评测上与不设限同分（5 会漏掉词库新补词的翻案，差 0.7 个点），重排开销约为不设限的一半。
-pub const NEURAL_MARGIN: f64 = 8.0;
+/// 神经重打分的缺省门槛（nat）：路径分落后最优路径超过这么多的不参与重排。8 是 k=8 时代定的；Qwen 接管后 k=16 下
+/// 9 到 12 是同一平台（「银杏叶」这类深名次路径 9 nat 就进了池），9 的重排开销最省（评测平均 137 ms 对 8 的 72 ms，
+/// 壳里是停顿后异步重排，每键不受影响），回放与 8 逐条一致。5 会漏掉词库新补词的翻案。
+pub const NEURAL_MARGIN: f64 = 9.0;
 
-/// 重打分给模型看的前文：本次会话最近上屏的这么多个字符。
-pub const RESCORE_CONTEXT_CHARS: usize = 64;
+/// 重打分给模型看的前文：本次会话最近上屏的这么多个字符。128：Qwen3.5-0.8B 接管重打分后回放整句 +0.4 个点
+/// （见 docs/notes/qwen-rescoring.md），壳里读应用光标前文的长度也跟着它走（`RESCORE_LOOKBACK`）。
+pub const RESCORE_CONTEXT_CHARS: usize = 128;
+
+/// 个人证据保护闸的倍率：神经要翻掉一条老排名靠前的路径时，两边的神经修正差必须不小于
+/// `gate × 守成路径的个人证据优势`（路径分减静态分——个人 n-gram、用户加分、代价那部分）。
+/// 0 不保护；缺省 2 是 Qwen3.5-0.8B 重打分在冻结日志回放上扫出来的：整句 86.8 → 87.1，词只掉 0.1 个点，
+/// 3 以上开始挡掉词的翻正（eval 冷启动没有个人数据，闸只影响回放与真实使用；调参记录见 docs/notes/qwen-rescoring.md）。
+pub const NEURAL_GATE: f64 = 2.0;
 
 impl Engine {
     pub fn new(dictionary: Dictionary) -> Self {
@@ -370,6 +387,8 @@ impl Engine {
             typo_costs: TypoCosts::DEFAULT,
             neural_context: RESCORE_CONTEXT_CHARS,
             neural_max_adjustment: None,
+            neural_gate: NEURAL_GATE,
+            neural_paths: RESCORE_PATHS,
             model_max_adjustment: None,
             rescore_sequence: 0,
             correction_cache: std::cell::RefCell::new(None),

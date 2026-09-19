@@ -102,13 +102,54 @@ impl Engine {
         }
         let lambda = self.neural_weight;
         let cap = self.neural_adjustment_cap();
-        for path in paths.iter_mut() {
+        let gate = self.neural_gate;
+        // 先把每条路径的调整算好再写回：闸要同时看几条路径的分，边写边比会读到半截状态。
+        // 进来的 paths 已按路径分降序排好，下标就是调整前的排名。
+        let mut adjusted = Vec::with_capacity(paths.len());
+        let mut shifts = Vec::with_capacity(paths.len());
+        for path in paths.iter() {
             let neural = cache.get(&path.text).expect("filled above");
-            let adjustment = lambda * (neural - path.static_score);
+            let shift = lambda * (neural - path.static_score);
             // ±inf 会被 clamp 成上限、NaN 穿过 clamp：两者都不该动这条路径的分
-            if adjustment.is_finite() {
-                path.score += adjustment.clamp(-cap, cap);
+            if shift.is_finite() {
+                let shift = shift.clamp(-cap, cap);
+                adjusted.push(path.score + shift);
+                shifts.push(shift);
+            } else {
+                adjusted.push(path.score);
+                shifts.push(0.0);
             }
+        }
+        // 个人证据保护闸：挑战者要翻掉守成者（老排名靠前）时，神经修正差得追得上守成者的个人证据优势
+        //（路径分减静态分——个人 n-gram、用户加分、代价那部分）的 gate 倍，否则压回平手（稳定排序让守成者留在前面）。
+        if gate > 0.0 {
+            let personal: Vec<f64> = paths
+                .iter()
+                .map(|path| path.score - path.static_score)
+                .collect();
+            for keeper in 0..paths.len() {
+                for challenger in keeper + 1..paths.len() {
+                    if adjusted[challenger] <= adjusted[keeper] {
+                        continue;
+                    }
+                    let neural_gap = shifts[challenger] - shifts[keeper];
+                    let personal_gap = personal[keeper] - personal[challenger];
+                    if neural_gap < gate * personal_gap {
+                        tracing::debug!(
+                            keeper = %paths[keeper].text,
+                            challenger = %paths[challenger].text,
+                            neural_gap,
+                            personal_gap,
+                            "个人证据闸：神经分差不够，压回平手"
+                        );
+                        adjusted[challenger] = adjusted[keeper];
+                        shifts[challenger] = adjusted[challenger] - paths[challenger].score;
+                    }
+                }
+            }
+        }
+        for (path, score) in paths.iter_mut().zip(adjusted) {
+            path.score = score;
         }
         paths.sort_by(|a, b| {
             b.score

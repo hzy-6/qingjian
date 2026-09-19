@@ -89,13 +89,17 @@ pub struct Args {
     #[arg(long)]
     pub neural_weight: Option<f64>,
 
-    /// 神经重打分的门槛（nat，缺省 8）：路径分落后最优路径超过这么多的不参与重排
+    /// 神经重打分的门槛（nat，缺省 9）：路径分落后最优路径超过这么多的不参与重排
     #[arg(long)]
     pub neural_margin: Option<f64>,
 
-    /// 神经重打分给模型看的前文字符数（缺省 64，0 为不给前文）
+    /// 神经重打分给模型看的前文字符数（缺省 128，0 为不给前文）
     #[arg(long)]
     pub neural_context: Option<usize>,
+
+    /// 神经重打分看 Viterbi 的前几条路径（缺省 16）：调大要连 --neural-margin 一起放宽，margin 在打分前删路径
+    #[arg(long)]
+    pub neural_paths: Option<usize>,
 
     /// 神经重打分单条路径的最大修正（nat，缺省 12）：神经分与静态分差距再大也只挪这么多；模型文件自带建议时缺省跟随它
     #[arg(long)]
@@ -104,6 +108,11 @@ pub struct Args {
     /// 神经重打分走后台线程（输入法壳里的接法）：查询先按词级模型出候选，再请求 / 等待重打分后重查一次；结果应与同步一致
     #[arg(long)]
     pub neural_async: bool,
+
+    /// Qwen 小模型重打分：GGUF 文件（llama.cpp 推理；需 `--features qwen` 编译），与 `--neural` 互斥，
+    /// 权重 / 门槛 / 前文等参数沿用 `--neural-*`
+    #[arg(long, conflicts_with = "neural")]
+    pub qwen: Option<PathBuf>,
 
     /// 逐键模式：把每个输入当作一键一键敲进去，每个前缀都查一次，打印每键各阶段耗时（性能测试用）
     #[arg(long)]

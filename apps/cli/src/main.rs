@@ -76,6 +76,32 @@ fn run() -> Result<(), CliError> {
     Ok(())
 }
 
+/// 按参数挑整句重打分的第二打分来源：`--neural` 字级 Transformer（`.qjm`）、`--qwen` Qwen GGUF，都不给就没有。
+/// 两个参数 clap 已保证互斥。
+fn neural_scorer(
+    args: &Args,
+) -> Result<Option<Box<dyn qingjian_core::sentence::SentenceScorer>>, CliError> {
+    if let Some(path) = &args.qwen {
+        #[cfg(feature = "qwen")]
+        {
+            let scorer =
+                qingjian_qwen::QwenScorer::load(path).map_err(|e| CliError::Qwen(e.to_string()))?;
+            return Ok(Some(Box::new(scorer)));
+        }
+        #[cfg(not(feature = "qwen"))]
+        {
+            return Err(CliError::Qwen(format!(
+                "--qwen 需要用 `--features qwen` 编译（cargo run -p qingjian-cli --features qwen）：{}",
+                path.display()
+            )));
+        }
+    }
+    match &args.neural {
+        Some(dir) => Ok(Some(Box::new(qingjian_neural::CharScorer::load(dir)?))),
+        None => Ok(None),
+    }
+}
+
 /// 组装 Engine：这是 Core 之外唯一知道具体 Translator / Learner 类型的地方。
 fn build_engine(args: &Args) -> Result<Engine, CliError> {
     let language: Language = args
@@ -186,30 +212,32 @@ fn build_engine(args: &Args) -> Result<Engine, CliError> {
         );
         engine = engine.with_language_model(Box::new(model));
     }
-    if let Some(dir) = &args.neural {
+    if let Some(scorer) = neural_scorer(args)? {
         let started = Instant::now();
-        let scorer = qingjian_neural::CharScorer::load(dir)?;
         tracing::info!(
-            load_ms = started.elapsed().as_millis(),
+            elapsed_ms = started.elapsed().as_millis(),
             weight = args.neural_weight.unwrap_or(qingjian_core::NEURAL_WEIGHT),
             "神经重打分已启用"
         );
         engine = if args.neural_async {
             engine.with_async_sentence_scorer(
-                Box::new(scorer),
+                scorer,
                 args.neural_weight,
                 args.neural_margin,
                 args.neural_context,
             )
         } else {
             engine.with_sentence_scorer(
-                Box::new(scorer),
+                scorer,
                 args.neural_weight,
                 args.neural_margin,
                 args.neural_context,
             )
         };
         engine.set_neural_max_adjustment(args.neural_max_adjustment);
+        if let Some(paths) = args.neural_paths {
+            engine.set_neural_paths(paths);
+        }
     }
     let config_path = args
         .config

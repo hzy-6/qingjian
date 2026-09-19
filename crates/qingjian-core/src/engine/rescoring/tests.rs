@@ -93,6 +93,11 @@ impl SentenceScorer for RecordsAfter {
 }
 
 fn path(text: &str, score: f64) -> Conversion {
+    personal_path(text, score, score)
+}
+
+/// 带静态分的路径：`score − static_score` 是个人证据（个人 n-gram、用户加分、代价）。
+fn personal_path(text: &str, score: f64, static_score: f64) -> Conversion {
     Conversion {
         text: text.to_owned(),
         syllables: Vec::new(),
@@ -102,7 +107,7 @@ fn path(text: &str, score: f64) -> Conversion {
             placeholder: false,
         }],
         score,
-        static_score: score,
+        static_score,
         penalty: 0.0,
     }
 }
@@ -385,6 +390,173 @@ fn nonfinite_scores_keep_the_static_order() {
         assert!((paths[0].score - -10.0).abs() < 1e-9, "{broken}");
         assert!((paths[1].score - -11.0).abs() < 1e-9, "{broken}");
     }
+}
+
+/// 池大小可配：k 调大后，原本进不了池的深名次路径也能被重排拉上来。
+#[test]
+fn a_larger_path_pool_lets_deep_paths_win() {
+    /// 给每条文本一个固定分的打分器:偏爱文本之外的按字典序打分,便于构造深名次翻案
+    struct Ranking(std::collections::HashMap<String, f64>);
+    impl SentenceScorer for Ranking {
+        fn score(&self, _context: &str, texts: &[&str]) -> Vec<f64> {
+            texts
+                .iter()
+                .map(|t| *self.0.get(*t).unwrap_or(&-30.0))
+                .collect()
+        }
+    }
+    let mut scores = std::collections::HashMap::new();
+    scores.insert("开饭".to_owned(), -20.0);
+    scores.insert("开放".to_owned(), -1.0);
+    let mut engine = engine().with_sentence_scorer(
+        Box::new(Ranking(scores)),
+        Some(1.0),
+        // margin 放全:别在打分前把深名次路径删掉
+        Some(100.0),
+        None,
+    );
+    engine.set_neural_paths(2);
+    // 词库里 开发 一枝独秀,开饭/开放 都不是常用路径;两条路径分接近,深名次的 开放 靠神经分翻上来
+    let mut paths = vec![
+        personal_path("开饭", -10.0, -10.0),
+        personal_path("开放", -11.0, -11.0),
+    ];
+    engine.rescore_paths(&mut paths);
+    assert_eq!(texts(&paths), ["开放", "开饭"]);
+    assert_eq!(engine.neural_paths(), 2);
+    engine.set_neural_paths(0);
+    assert_eq!(engine.neural_paths(), 1, "k 钳底到 1");
+}
+
+/// 闸：守成路径有个人证据优势时，神经分差追不上 gate 倍就不许翻案。
+#[test]
+fn the_gate_blocks_a_flip_backed_by_weaker_neural_than_personal_evidence() {
+    struct Mildly(&'static str);
+    impl SentenceScorer for Mildly {
+        fn score(&self, _context: &str, texts: &[&str]) -> Vec<f64> {
+            texts
+                .iter()
+                .map(|t| if *t == self.0 { -4.0 } else { -9.0 })
+                .collect()
+        }
+    }
+    // 开饭 路径分 −10、静态 −13（个人证据 3 nat），开放 路径分 −11、静态 −11（没有）。
+    // 神经偏爱 开放（−4 对 −9）：λ 0.5 下神经修正差 (−4+11)·0.5 − (−9+13)·0.5 = 2.5 nat，
+    // 足以翻案（开放 −7.5 > 开饭 −8）但小于 3 nat 的个人证据优势
+    let gated = || {
+        let mut engine =
+            engine().with_sentence_scorer(Box::new(Mildly("开放")), Some(0.5), None, None);
+        engine.set_neural_gate(1.0);
+        engine
+    };
+    // 不设闸的对照：闸的缺省已是 2，显式归零
+    let mut ungated =
+        engine().with_sentence_scorer(Box::new(Mildly("开放")), Some(0.5), None, None);
+    ungated.set_neural_gate(0.0);
+    let mut paths = vec![
+        personal_path("开饭", -10.0, -13.0),
+        personal_path("开放", -11.0, -11.0),
+    ];
+    ungated.rescore_paths(&mut paths);
+    assert_eq!(
+        texts(&paths),
+        ["开放", "开饭"],
+        "不设闸时 2.5 nat 的神经差翻得了案"
+    );
+    let mut paths = vec![
+        personal_path("开饭", -10.0, -13.0),
+        personal_path("开放", -11.0, -11.0),
+    ];
+    gated().rescore_paths(&mut paths);
+    assert_eq!(
+        texts(&paths),
+        ["开饭", "开放"],
+        "2.5 < 1×3，闸压回平手，守成者留前"
+    );
+    // 神经优势远超个人证据时闸拦不住（Prefers 的分差有 17 nat）
+    let mut strong =
+        engine().with_sentence_scorer(Box::new(Prefers("开放")), Some(1.0), None, None);
+    strong.set_neural_gate(1.0);
+    let mut paths = vec![
+        personal_path("开饭", -10.0, -13.0),
+        personal_path("开放", -11.0, -11.0),
+    ];
+    strong.rescore_paths(&mut paths);
+    assert_eq!(
+        texts(&paths),
+        ["开放", "开饭"],
+        "17 nat 的神经差盖过 3 nat 的个人证据"
+    );
+    // 挑战者自己带着更多个人证据时闸不拦（守成者的个人优势是负数）
+    let mut reversed =
+        engine().with_sentence_scorer(Box::new(Mildly("开饭")), Some(0.5), None, None);
+    reversed.set_neural_gate(1.0);
+    let mut paths = vec![
+        personal_path("开放", -10.0, -10.0),
+        personal_path("开饭", -11.0, -14.0),
+    ];
+    reversed.rescore_paths(&mut paths);
+    assert_eq!(texts(&paths), ["开饭", "开放"]);
+    // 非法值当 0(显式关闭)
+    let mut invalid = engine();
+    invalid.set_neural_gate(f64::NAN);
+    assert_eq!(invalid.neural_gate(), 0.0);
+    invalid.set_neural_gate(-3.0);
+    assert_eq!(invalid.neural_gate(), 0.0);
+    invalid.set_neural_gate(f64::INFINITY);
+    assert_eq!(invalid.neural_gate(), 0.0);
+}
+
+/// 三条路径的链式压回:闸按下标(老排名)字典序处理、只向下压。测试锁定该遍历序的当前行为。
+#[test]
+fn the_gate_chains_downward_through_three_paths() {
+    /// 按文本查固定分的打分器:开饭 / 开放 / 开工 各一个。
+    struct Fixed([f64; 3]);
+    impl SentenceScorer for Fixed {
+        fn score(&self, _context: &str, texts: &[&str]) -> Vec<f64> {
+            texts
+                .iter()
+                .map(|t| {
+                    self.0[match *t {
+                        "开饭" => 0,
+                        "开放" => 1,
+                        _ => 2,
+                    }]
+                })
+                .collect()
+        }
+    }
+    // 开饭 守成(路径 −10、静态 −13,个人证据 3),开放(−11/−11,无证据),开工(−12/−12,无证据)。
+    // 神经 −9/−4/−20、λ0.5:开放对开饭的神经差 (−4+11)·0.5 − (−9+13)·0.5 = 1.5 < 2×3,全链压回,守成者第一。
+    let mut gated =
+        engine().with_sentence_scorer(Box::new(Fixed([-9.0, -4.0, -20.0])), Some(0.5), None, None);
+    gated.set_neural_gate(2.0);
+    let mut paths = vec![
+        personal_path("开饭", -10.0, -13.0),
+        personal_path("开放", -11.0, -11.0),
+        personal_path("开工", -12.0, -12.0),
+    ];
+    gated.rescore_paths(&mut paths);
+    assert_eq!(
+        texts(&paths),
+        ["开饭", "开放", "开工"],
+        "1.5 nat 神经差翻不过 2×3 的闸"
+    );
+    // 神经差抬到 8(−16/0/−20):修正 开放 +5.5、开饭 −1.5,差 7 > 6,放行翻案
+    let mut strong =
+        engine().with_sentence_scorer(Box::new(Fixed([-16.0, 0.0, -20.0])), Some(0.5), None, None);
+    strong.set_neural_gate(2.0);
+    let mut paths = vec![
+        personal_path("开饭", -10.0, -13.0),
+        personal_path("开放", -11.0, -11.0),
+        personal_path("开工", -12.0, -12.0),
+    ];
+    strong.rescore_paths(&mut paths);
+    assert_eq!(
+        texts(&paths),
+        ["开放", "开饭", "开工"],
+        "7 nat 神经差盖过 2×3 的闸"
+    );
 }
 
 #[test]

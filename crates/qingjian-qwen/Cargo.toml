@@ -1,0 +1,19 @@
+[package]
+name = "qingjian-qwen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+qingjian-core.workspace = true
+llama-cpp-2 = { version = "0.1.156", features = ["metal"], optional = true }
+thiserror.workspace = true
+tracing.workspace = true
+
+[features]
+# llama.cpp 运行时（C++ 构建，重）：不开的话本 crate 是空壳，workspace 默认构建与 CI 不拉 llama.cpp
+runtime = ["dep:llama-cpp-2"]
+
+[lints]
+workspace = true

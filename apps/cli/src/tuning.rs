@@ -5,11 +5,12 @@ use qingjian_core::correction::TypoCosts;
 use qingjian_core::sentence::Interpolation;
 
 /// 可调的参数名。
-pub const KEYS: [&str; 10] = [
+pub const KEYS: [&str; 11] = [
     "lambda",
     "k",
     "cap",
     "discount",
+    "gate",
     "transpose",
     "substitute",
     "extra",
@@ -25,6 +26,7 @@ pub fn apply(engine: &mut Engine, settings: &[String]) -> Result<(), TuneError> 
     }
     let mut interpolation = Interpolation::default();
     let mut costs = TypoCosts::default();
+    let mut gate: Option<f64> = None;
     for setting in settings {
         let (key, value) = setting
             .split_once('=')
@@ -38,6 +40,7 @@ pub fn apply(engine: &mut Engine, settings: &[String]) -> Result<(), TuneError> 
             "k" => interpolation.confidence_k = value,
             "cap" => interpolation.max_confidence = value,
             "discount" => interpolation.trigram_discount = value,
+            "gate" => gate = Some(value),
             "transpose" => costs.transpose = value,
             "substitute" => costs.substitute = value,
             "extra" => costs.extra = value,
@@ -51,9 +54,12 @@ pub fn apply(engine: &mut Engine, settings: &[String]) -> Result<(), TuneError> 
             }
         }
     }
-    tracing::info!(?interpolation, ?costs, "参数覆盖");
+    tracing::info!(?interpolation, ?costs, ?gate, "参数覆盖");
     engine.set_interpolation(interpolation);
     engine.set_typo_costs(costs);
+    if let Some(gate) = gate {
+        engine.set_neural_gate(gate);
+    }
     Ok(())
 }
 

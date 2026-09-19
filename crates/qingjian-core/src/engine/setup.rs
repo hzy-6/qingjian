@@ -235,6 +235,33 @@ impl Engine {
         self.neural_max_adjustment = max;
     }
 
+    /// 个人证据保护闸的倍率（见 [`NEURAL_GATE`]，缺省 2）：神经要翻掉一条老排名靠前的路径时，
+    /// 神经修正差必须不小于 `gate ×` 守成路径的个人证据优势（路径分减静态分），否则把挑战者压回平手。
+    /// 0 显式关闭保护；非有限值与负数当 0。
+    pub fn set_neural_gate(&mut self, gate: f64) {
+        self.neural_gate = if gate.is_finite() && gate > 0.0 {
+            gate
+        } else {
+            0.0
+        };
+    }
+
+    /// 当前配置的个人证据保护闸倍率。
+    pub fn neural_gate(&self) -> f64 {
+        self.neural_gate
+    }
+
+    /// 神经重打分看 Viterbi 的前几条路径（缺省 [`RESCORE_PATHS`]）。调大只多打分、不重构词图
+    /// （分歧候选本就全量生成）；要见效必须连 [`Self::set_neural_margin`] 一起放宽——margin 在打分前删路径。
+    pub fn set_neural_paths(&mut self, paths: usize) {
+        self.neural_paths = paths.max(1);
+    }
+
+    /// 当前配置的重排路径池大小。
+    pub fn neural_paths(&self) -> usize {
+        self.neural_paths
+    }
+
     fn set_neural_parameters(
         &mut self,
         weight: Option<f64>,

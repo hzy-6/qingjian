@@ -64,14 +64,18 @@ pub const MAX_WORD_SYLLABLES: usize = 8;
 pub const MIN_PARTIAL_LETTERS: usize = 2;
 
 /// 每个格子最多留几个词（按词库词频 + 用户加分）。同音词很多，全留会让束搜索白费。
+/// 接神经重排器时放宽到 10 试过：净伤害 1.4 个点（低频路径挤爆重排池，见 docs/notes/qwen-rescoring.md），
+/// 宽度支持留在 `convert_paths` 的 `span_width` 参数与缓存键里作实验口。
 pub const SPAN_CANDIDATES: usize = 6;
 
 /// 有简拼位置的格子最多留几个词：`h` 下有 和 / 好 / 会 / 还 / 很 …… 几十个常用字，
 /// 只留六个会把句子里要的那个挤掉，多留一些让语言模型去挑。
 pub const ABBREVIATED_SPAN_CANDIDATES: usize = 20;
 
-/// 每个位置最多保留几条部分路径。
-pub const BEAM_WIDTH: usize = 8;
+/// 每个位置最多保留几条部分路径。10:Qwen 重排接棒后从 8 提上来的——好结尾但静态分不够的节点
+/// (「微风|轻拂」在 4 字句被高频单字组合挤出前 8)活到终点,神经分才救得了它;盲评 +0.7、回放词 +1、
+/// 回放整句不变,102M 同样受益(结构公平)。12 与 10 同分,「分析师」类的终点仍不在 12 内(另有原因)。
+pub const BEAM_WIDTH: usize = 10;
 
 /// 语言模型不认识、只能按词库词频兜底的词扣多少分：模型见过的词更可信。
 pub const FALLBACK_PENALTY: f64 = -4.0;

@@ -1,0 +1,157 @@
+# Qwen3.5-0.8B 接管整句重打分(2026-09-19)
+
+## 做了什么
+
+- 换模型:随包神经模型从 102M 字级 Transformer(uer/gpt2-chinese-cluecorpussmall 转制,`model.qjm`)换成
+  **Qwen3.5-0.8B-Q8_0 GGUF**(774 MB,Apache-2.0,与 GPL-3.0 兼容),放 `data/model/`,`bundle.sh` 打进 `Resources/model/`。
+  随包只带 GGUF;`.qjm` 不再随包(旧模型放进 `~/Library/Application Support/Qingjian/model/` 仍可用——壳的装配
+  `apps/macos` 的 `host/model` 在 GGUF 缺席时退 `.qjm`,代码路径与 `qingjian-neural` crate 保留,是以后评新模型的对照基线)。
+- 新 crate `qingjian-qwen`:llama.cpp 的 Rust 绑定(`llama-cpp-2` 0.1.156,feature `runtime` 门控,默认空壳、CI 不拉 C++ 依赖),
+  `QwenScorer` 实现 `SentenceScorer`,给「前文 + 整句」按 BPE token 累加 log 概率,Metal 加速,双向上下文(`score_with_after`)。
+- Engine 三个新缺省:`NEURAL_GATE` = 2(个人证据保护闸,见下)、`RESCORE_CONTEXT_CHARS` = 128(原 64)、
+  Qwen 的修正建议 `max_adjustment` = 30 nat(走模型建议机制,壳不传参数即最优)。λ 仍是 `NEURAL_WEIGHT` = 0.5。
+- CLI:`--qwen <gguf>`(与 `--neural` 互斥,共用 `--neural-*` 参数)、`--tune gate=倍率`。
+
+## 为什么要换
+
+自训模型在 wiki+LCCC(12.7 亿 token)量级上 23M→36M→102M 收益封顶,剩余 miss 全是搭配判别
+(的/得、再/在、编程/变成、带货/大火)。Qwen3.5 预训练语料大 3~4 个数量级,正是这类判断;
+对 eval-miss-closeout 里**小模型时代的 22 条 miss**(λ1.0 口径)它翻正 9 条。注意口径:对 102M@λ0.5 的
+逐句对账是**翻正 3 条(吓倒、直播带货、他感冒了)、翻坏 1 条(他不仅→它),净 +2 句;139 句上这个差距
+不显著**(discordant 4 对,McNemar p≈0.63,1 句=0.7pp)。换模型的依据是多方证据的合力:搭配类 miss 在
+λ1.0 下全翻正(探针逐句实测)、回放词打平、延迟更低、以及 102M 的字级预训练上限已经到了——不是单看 139 句的 +1.4pp。
+
+## 数字
+
+139 句盲评(`data/eval/baseline-eval.txt` + IT/成语词库,冷启动):bigram 71.9% → 102M 87.8% → **Qwen 89.2%**(字准 98.9%,查询平均 72 ms,比 102M 的 102 ms 快——llama.cpp 融合核对比 candle 小算子调度)。
+
+冻结日志回放(2026-09-19 快照,1678 词 / 535 句,日志在实时增长、对比必须先 `cp` 冻结):
+
+| 配置(都是 Qwen λ0.5) | 词 | 整句 |
+|---|---|---|
+| 102M(换前) | 89.5%(1502) | **87.9%**(470) |
+| 无闸 ctx64 | 89.6%* | 86.8%* |
+| gate2 ctx64 | 89.4%(1500) | 87.1%(466) |
+| gate3 ctx64 | 89.3% | 87.3% |
+| **gate2 ctx128(新缺省)** | **89.5%(1502)** | 87.5%(468) |
+| gate3 ctx128 | 89.5% | 87.1% |
+
+(*为略早的快照,只看趋势。)λ≥1(引擎钳到 1)盲评封顶 89.9% 但回放整句崩到 84.4——回放的「正确答案」是历史提交,
+多半是当时引擎自己的输出,神经压过个人证据就翻案;这正是 eval-miss-closeout 口径警示写的 then/now 偏差。
+
+## 个人证据保护闸
+
+`rescore_paths` 里,挑战者要翻掉老排名靠前的路径(守成者)时,要求
+`神经修正差 ≥ gate × 守成者个人证据优势`,不够就把挑战者压回平手(稳定排序让守成者留前)。
+个人证据 = `路径分 − 静态分`(个人 n-gram、用户加分、代价)。eval 冷启动没有个人数据,闸零影响;回放整句 86.8 → 87.1(gate2)。
+gate≥3 开始挡掉词的翻正(词 89.4 → 89.3),2 是整句/词的平衡点。
+
+逐句对账(gate2,Qwen 与 102M 的整句 miss 差集):Qwen 独有 miss 7 条里 5 条是用户口癖
+(恩恩、第二个、都要上、那一类、把过来——用户当年就这么选的);Qwen 独有翻正 6 条(不用呢、词与、分析一起、两哈、使用护照、要通过)
+全是 102M 的真实错误。**语言判断全面占优,剩 2 句的差距是个人习语记忆,由学习系统追,不归通用模型管。**
+
+## llama.cpp 的坑(Qwen3.5 是注意力 + SSM 混合架构,`qwen35`)
+
+- `seq_cp` 只支持整段拷贝,且统一 KV 缓存多 stream 时会整块拷贝 KV buffer(一次几百 MB 的 GPU 拷贝,还踩 `invalid token[0] = -1` 的断言)。
+- `seq_rm` 中间位置回卷受 SSM 逐 token 快照数(`n_rs_seq`)限制,默认不够;调大则 SSM 状态张量按 (1+n) 倍膨胀,不划算。
+- 结论:**每条候选拼上前文各自成一个序列、一次 decode 打一批、打完 `clear_kv_cache`**(整段重算,前文几十个 token 在 Metal 上很便宜)。
+  `clear_kv_cache` 才会重置循环状态的尾指针,`seq_rm(-1)` 不会(悬空尾指针会在下次 decode 的 `GGML_ASSERT` 里炸)。
+- `dec_start_token_id` 对 qwen35 是 -1(`LLAMA_TOKEN_NULL`),空前文要退到 BOS / EOS 给候选首 token 一个条件分布。
+- 超过 512 token 的 batch 被切 ubatch,而混合架构要求一条序列的 token 不跨 ubatch:按 `CHUNK_TOKENS` = 480 预算切批。
+
+## 第二轮:多智能体对抗调优(2026-09-19 下午)
+
+四个智能体(实证探针/静态分析/架构设计/红队)交叉后的改动与结论。**正式尺子换冻结集** `data/eval/sentences-frozen.tsv`
+(`--eval-save` 三列格式,拼音不再随词库补频漂移——红队指出原始文本评测会随词库共同进化,历史数字不可复现):
+
+- **margin 8 → 9**(`NEURAL_MARGIN`):k=16 下「银杏叶」这类深名次路径 9 nat 就进池,9-12 同平台、9 最省,回放逐条不变。
+- **束宽 8 → 10**(`BEAM_WIDTH`):探针定位的「终点节点束剪」——好结尾但静态分不够的节点(「微风|轻拂」在 4 字句
+  被高频单字组合挤出前 8)活不到终点,神经分再对也没用。10 让它活下来,盲评 +0.7(轻拂 翻正)、回放词 +1、
+  回放整句不变,**102M 同样受益**(87.8→88.5,结构公平)。12 与 10 同分,不要。
+- **`--neural-paths` 可配**(`Engine::set_neural_paths`,缺省 16):诊断证明 k 对本清单增益≈0——剩余 miss 是
+  **结构问题不是 k 问题**:双分歧盲区(「不曾+起舞」两处同时偏离静态最优,分歧链每节点只换一档 back2,无法复活)、
+  终点束剪(束宽 10 已治)、或模型判断。crate-notes 里「= 8」的旧文档已纠正。
+- **格子宽度放宽到 10:试过,撤销**(`convert_paths` 的 `span_width` 参数与缓存键宽度支持保留作实验口):
+  净伤害 1.4 个点——低频路径把 k=16 的重排池挤爆,厨师/火候、直播带货 反被顶出去。
+- λ 0.6/0.75/1.0 全部 ≤ 同分且字准更低;λ1.0 修搭配(的/得/地/夸奖他,探针逐句实测)翻代词,**零和**。
+- 红队命中的口径修正:「翻正 9 条」是小模型时代 miss 表的 λ1.0 口径;对 102M@λ0.5 的逐句对账是净 +2 句
+  (139 句上不显著,McNemar p≈0.63);cap30 是盲评扫出的缺省,不是训练侧建议。
+
+## 最终数字(冻结集 + 冻结回放快照 1678 词 / 535 句)
+
+| 配置 | 盲评首选 | 盲评字准 | 回放词 | 回放整句 |
+|---|---|---|---|---|
+| 无神经 | 71.9% | 95.8% | 88.5% | 86.6% |
+| 102M(被换下的) | 88.5% | 98.8% | 89.5% | **87.9%** |
+| **Qwen(全缺省)** | **90.6%** | **99.1%** | **89.6%** | 87.5% |
+
+剩余 13 条 miss:6 条无上下文代词(她/他/它,信息论上限)+ 的/得/是×3(λ1.0 可修但翻代词,零和)+
+再/在、会议室(bigram 语料,复开条件是 lm.qj 重统计)+ 数据分析师(终点不在束内,原因待查)+ 不曾起舞(双分歧盲区,
+要加深分歧组合,结构改动留观)。下一档提升的出路:评测集扩容混域(closeout 行动项)、lm.qj 语料重统计、底座换代。
+
+## 第三轮:lm.qj 语料重统计(2026-09-19 晚,最终采用 fill-in 混合)
+
+管线全通:hf-mirror 拉 维基20231101(2.4G)+LCCC(0.8G)+知乎KOL(2.0G)→ `parquet_to_text` → `bigram`(1.9 亿句,
+800 万 bigram)→ `pack lm`。四种方案 × 两把尺:
+
+| lm | 盲评 Qwen | 盲评静态 | 回放词 | 回放整句 |
+|---|---|---|---|---|
+| 旧(维基+LCCC) | 90.6 / 99.1 | 71.9 / 95.8 | **89.6** | **87.5** |
+| 全新替换(知乎全量) | 90.6 | 83.5 | 89.1 | 84.9 |
+| 全新替换(维基×2+知乎半) | 92.1 | 82.7 | 88.0 | 83.9 |
+| **fill-in 混合(采用)** | **92.1 / 99.3** | 79.9 / 97.4 | 89.4(−3) | 86.4(−6) |
+
+**全新替换必损回放 14-19 句**(前五不动、首选换位——静态先验一换用户历史选择全体挪位)。**fill-in**(`tools/corpus/lm_fillin.py`):
+先从 lm.qj 容器把旧计数导成 TSV(容器布局:头 32B/节项 24B/WordEntry 12B/Successor 8B/CSR),再把新语料的计数
+**只填旧表没有的条目**(按新旧总计数比 0.31 缩放、封顶在前词旧计数一半),已有条目一律不动——熟悉排序保留,
+覆盖补上(的→会议室 95、数据→分析师 1071、不要→再 1332)。
+
+盲评 90.6 → **92.1**(13 条 miss 修好 4:数据分析师、他的普通话说得、他不仅学习好、不曾起舞;新破 2:雨下的、网络连接),
+回放 −6 句(换位型,前五 97.9% 不动,个人 n-gram 会随使用回填)、词 −3。回退一条命令:`cp /tmp/lm-old.qj data/generated/lm.qj && bundle.sh --install`。
+
+教训:语域配比敏感(口语压坏正式句,维基加权伤口语回放);会议室/再犹豫 的 fill 计数被缩放压得太低没翻动,
+要它们得提高 fill 上限(会同步放大回放位移,未做);评测集扩容前,139 句上 ±2 句的差异当噪声读。
+知乎内容许可未声明(知乎条款默认 CC-BY-NC),fill-in 只取计数统计且 lm 随包不分发源文本,如将来对外分发需重估。
+语料与各版 TSV 留在 data/(gitignore,约 15G)。
+
+## 第四轮:多模态裁剪与剩余项(2026-09-20)
+
+### GGUF 词表裁剪(已随包)
+
+解剖 774MB 的 GGUF:320 个张量里**没有视觉/音频塔**(unsloth 出品即纯文本版,多模态在独立的 mmproj 文件、从未下载);
+真正的大头是 **248,320 行的词嵌入(254M 参数,占 33.8%)**,其中 96,677 行是泰/阿/韩文碎片与 `<|image_pad|>`/`tts_*`
+等中文输入法永远打不出的 token。`tools/corpus/trim_gguf_vocab.py` 按 Q8_0 行块(34B×32参数)切除这些行、
+重写词表/类型/eos 元数据与张量偏移(GGUF 的 offset 相对数据区起点;dims 是 [ne0=hidden, ne1=vocab]——
+两处都踩过坑,工具里都有注释)。**774MB → 672MB(−102MB),盲评逐句一致(92.1/99.3),延迟 77→63ms**
+(logsumexp 少算 9.7 万行),回放 −2 句(softmax 重归一的边缘翻转)。随包优先挑 `*-text.gguf`。
+
+### 静态句首上下文(code-tracer 的「上下文盲」假设:证伪为跨句、证真为句内)
+
+`convert_paths` 增加 `start_context` 参数、引擎喂 `chain.context()`(连打时第二段组句的**句内**左文进静态转移,
+以前丢掉,这是真收益);`Engine::seed_chain` 可外部种链。但评测侧实验(895 句混域尺,成对句互为上下文):
+喂跨句左词给静态 **−0.5 个点**——bigram 统计按句切分,跨句左词是分布外输入,`Context::START` 本来就是正确的
+边界先验。评测因此不种链(上文只喂 Qwen);引擎侧贯通保留。
+
+### 大尺(895 句混域,知乎/维基/LCCC/文档四域成对抽句)
+
+Qwen+全套 60.2%(字准 90.5)、纯静态 52.2%——比 139 句集难得多、也更接近真实水平;139 尺的 89-92% 偏乐观。
+新尺冻结在 `data/eval/corpus-ctx.tsv`,以后调参以它为准。fill-in 全额上限试过:两尺零变化(会议室/再犹豫
+卡在对手计数,不在上限),维持半量。
+
+## 验收
+
+```bash
+cargo run --release -p qingjian-cli --features qwen -- \
+  --eval-text data/eval/sentences-frozen.tsv \
+  --extra-dict data/generated/dicts/idioms.qj --extra-dict data/generated/dicts/it_computing.qj \
+  --qwen data/model/Qwen3.5-0.8B-Q8_0-text.gguf     # 盲评 92.1% / 99.3%(fill-in lm + 裁剪词表)
+cargo run --release -p qingjian-cli --features qwen -- \
+  --eval-text data/eval/corpus-ctx.tsv \
+  --extra-dict data/generated/dicts/idioms.qj --extra-dict data/generated/dicts/it_computing.qj \
+  --qwen data/model/Qwen3.5-0.8B-Q8_0-text.gguf     # 大尺 895 句:60.2% / 90.5%
+cargo run --release -p qingjian-cli --features qwen -- \
+  --replay <冻结的 input-log 快照> --qwen data/model/Qwen3.5-0.8B-Q8_0-text.gguf
+```
+
+裸 `--qwen` 不带任何调参 flag 即出厂配置(λ 0.5 / cap 30 / gate 2 / margin 9 / 束宽 10 / ctx 128 全是缺省)。
+工具:`tools/corpus/lm_fillin.py`(lm 计数导出+fill-in 混合)、`tools/corpus/trim_gguf_vocab.py`(GGUF 词表裁剪)。

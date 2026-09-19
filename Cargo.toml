@@ -10,6 +10,7 @@ members = [
     "crates/qingjian-lm",
     "crates/qingjian-format",
     "crates/qingjian-neural",
+    "crates/qingjian-qwen",
     "crates/qingjian-render",
     "apps/cli", "apps/macos", "tools/dict-convert", "tools/gloss-gen",
 ]
@@ -34,6 +35,7 @@ qingjian-predict = { path = "crates/qingjian-predict" }
 qingjian-lm = { path = "crates/qingjian-lm" }
 qingjian-format = { path = "crates/qingjian-format" }
 qingjian-neural = { path = "crates/qingjian-neural" }
+qingjian-qwen = { path = "crates/qingjian-qwen" }
 qingjian-render = { path = "crates/qingjian-render" }
 
 # 外部依赖统一在这里定版本，子 crate 一律 `xxx.workspace = true`

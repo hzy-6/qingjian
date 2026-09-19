@@ -11,8 +11,9 @@ pub struct Pair {
     pub context: String,
 }
 
-/// 上文最多留几个字符。
-pub const MAX_CONTEXT_CHARS: usize = 64;
+/// 上文最多留几个字符。128 是「前文给模型看的上限」的方向值（`RESCORE_CONTEXT_CHARS` 的两倍）：
+/// 冻结集存长一点，跑的时候用 `--neural-context` 截到要评测的长度。
+pub const MAX_CONTEXT_CHARS: usize = 128;
 
 impl Pair {
     /// 冻结文件里的一行：`句子\t拼音\t上文`（上文可空）。

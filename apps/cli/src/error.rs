@@ -23,6 +23,10 @@ pub enum CliError {
     #[error("learning language must be en, ja or es, got {0:?}")]
     Language(String),
 
+    /// Qwen 小模型（`--qwen`）加载失败。
+    #[error("qwen scorer: {0}")]
+    Qwen(String),
+
     #[error(transparent)]
     Config(#[from] ConfigError),
 

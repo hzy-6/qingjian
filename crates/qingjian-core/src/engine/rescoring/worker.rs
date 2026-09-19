@@ -73,7 +73,11 @@ impl RescoreWorker {
     }
 
     pub fn is_alive(&self) -> bool {
-        self.handle.is_some()
+        // 线程真死过（打分器 panic 等）就当没有异步重排器：引擎退化成同步路径外的「不重排」，别让它
+        // 永远报活着、壳每次停顿都白跑一趟请求
+        self.handle
+            .as_ref()
+            .is_none_or(|handle| !handle.is_finished())
     }
 
     /// 提交一次打分任务。`sequence` 由引擎分配（单调递增），结果原样带回；相同 (before, after, texts)

@@ -34,12 +34,12 @@ pub use emoji::EmojiTable;
 pub use engine::{
     AnnotationReport, BOOKS, Book, CloudWord, CommitEntry, Engine, EngineSession, FRESH_UNTIL,
     FilledGloss, Forgotten, GlossFiller, INPUT_LOG_VERSION, InputLogEntry, InputLogger,
-    InputSource, Learner, LevelCount, MarkedKind, MarkedSegment, ModeKeys, NEURAL_MARGIN,
-    NEURAL_MAX_ADJUSTMENT, NEURAL_WEIGHT, NoGlossFiller, NoInputLogger, NoLearner, NoPredictor,
-    NoTranslator, NoUsageMeter, NoVocabularyTracker, Prediction, PredictionKind, PredictionPolicy,
-    PredictionRequest, Predictor, QUESTION_PREFIX, Query, RESCORE_CONTEXT_CHARS, SurroundingText,
-    Timings, Translator, Usage, UsageMeter, UsageSummary, VocabularySummary, VocabularyTracker,
-    book_scale,
+    InputSource, Learner, LevelCount, MarkedKind, MarkedSegment, ModeKeys, NEURAL_GATE,
+    NEURAL_MARGIN, NEURAL_MAX_ADJUSTMENT, NEURAL_WEIGHT, NoGlossFiller, NoInputLogger, NoLearner,
+    NoPredictor, NoTranslator, NoUsageMeter, NoVocabularyTracker, Prediction, PredictionKind,
+    PredictionPolicy, PredictionRequest, Predictor, QUESTION_PREFIX, Query, RESCORE_CONTEXT_CHARS,
+    RESCORE_PATHS, SurroundingText, Timings, Translator, Usage, UsageMeter, UsageSummary,
+    VocabularySummary, VocabularyTracker, book_scale,
 };
 pub use fuzzy::FuzzyRules;
 pub use history::InputHistory;

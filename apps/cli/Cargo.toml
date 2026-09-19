@@ -9,6 +9,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Qwen GGUF 整句重打分：引入 llama.cpp（C++ 构建，重），默认不开
+qwen = ["dep:qingjian-qwen", "qingjian-qwen/runtime"]
+
 [dependencies]
 clap.workspace = true
 serde.workspace = true
@@ -19,6 +23,7 @@ qingjian-dictionary.workspace = true
 qingjian-learning.workspace = true
 qingjian-platform.workspace = true
 qingjian-predict.workspace = true
+qingjian-qwen = { workspace = true, optional = true }
 qingjian-lm.workspace = true
 qingjian-neural.workspace = true
 qingjian-translate.workspace = true

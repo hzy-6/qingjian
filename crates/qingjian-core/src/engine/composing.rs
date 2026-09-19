@@ -61,6 +61,12 @@ impl Engine {
         }
     }
 
+    /// 把链的「上一个词」设成外部给的词（评测注入真实上文用）：下一段组句的静态转移与
+    /// 个人 n-gram 拿到真前词而不是句首标记，词级排序的上下文同理。只影响打分，不进学习链。
+    pub fn seed_chain(&mut self, word: &str) {
+        self.chain.seed(word);
+    }
+
     /// 壳告知正在输入的应用（macOS bundle identifier），写进输入日志；不知道就给 `None`。
     pub fn set_application(&mut self, app: Option<String>) {
         self.application = app;
