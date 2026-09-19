@@ -1,6 +1,6 @@
 //! 数据文件位置：只读数据在 `.app/Contents/Resources/`，用户数据在 `~/Library/Application Support/Qingjian/`。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use objc2_foundation::NSBundle;
 
@@ -57,4 +57,22 @@ pub fn model_path() -> Option<PathBuf> {
         return Some(found);
     }
     qingjian_neural::find_model(&resources_dir().ok()?.join("model"))
+}
+
+/// Qwen GGUF（llama.cpp）：查找规则同 [`model_path`]，目录里有几份按文件名取最小的一份
+/// （`read_dir` 不保证顺序，显式取 min 与 bundle.sh 的字典序一致）。有 GGUF 就用它重排（首选），没有再退回 `.qjm` 字级模型。
+pub fn qwen_path() -> Option<PathBuf> {
+    fn first_gguf(dir: &Path) -> Option<PathBuf> {
+        std::fs::read_dir(dir)
+            .ok()?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "gguf"))
+            .min_by_key(|path| path.file_name().map(std::ffi::OsStr::to_owned))
+    }
+    first_gguf(&user_data_dir()?.join("model")).or_else(|| {
+        resources_dir()
+            .ok()
+            .and_then(|dir| first_gguf(&dir.join("model")))
+    })
 }

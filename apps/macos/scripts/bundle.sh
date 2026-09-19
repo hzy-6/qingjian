@@ -91,18 +91,20 @@ if [[ -f data/generated/dict.tsv || -f data/generated/dict.qj ]]; then
     cp data/generated/dicts/*.qj "$APP/Contents/Resources/dicts/"
   fi
   [[ -f data/generated/lm.qj ]] && cp data/generated/lm.qj "$APP/Contents/Resources/"
-  # 本地整句模型（字级 Transformer）：训练仓库 ../train 导出三件套到 data/model/，tools/release/pack-model.sh 打成 model.qjm，
-  # 随包只带这一个文件放 Resources/model/（三件套比 .qjm 新就重打）；什么都没有就不重排
+  # 本地整句模型：Qwen GGUF（llama.cpp 推理），放 data/model/ 里；随包只带这一个文件。
+  # 不再随包 .qjm 字级模型（Qwen 全面占优，见 docs/notes/qwen-rescoring.md）——想用旧模型把它放进
+  # ~/Library/Application Support/Qingjian/model/ 即可（壳的装配 GGUF 缺席时退 .qjm）；开发打包用 tools/release/pack-model.sh
   model_dir="${QINGJIAN_MODEL_DIR:-data/model}"
-  if [[ -f "$model_dir/model.safetensors" ]]; then
-    QINGJIAN_MODEL_DIR="$model_dir" tools/release/pack-model.sh
-  fi
-  if [[ -f "$model_dir/model.qjm" ]]; then
+  # GGUF 优先挑裁剪过词表的纯文本版(*-text.gguf,小 100MB,盲评逐句一致),没有再按文件名取最小一份
+  # (装配与 paths::qwen_path 同规则);几百 MB,随包体积的主要来源
+  for gguf in "$model_dir"/*-text.gguf "$model_dir"/*.gguf; do
+    [[ -f "$gguf" ]] || continue
     mkdir -p "$APP/Contents/Resources/model"
-    cp "$model_dir/model.qjm" "$APP/Contents/Resources/model/"
-    chmod 644 "$APP/Contents/Resources/model/model.qjm"
-    echo "打包本地整句模型：$model_dir/model.qjm"
-  fi
+    cp "$gguf" "$APP/Contents/Resources/model/"
+    chmod 644 "$APP/Contents/Resources/model/$(basename "$gguf")"
+    echo "打包 Qwen 模型：$gguf"
+    break
+  done
   # 释义表打成 .qj（TSV 比 .qj 新时重打），英文词表仍是 TSV。各表来源不同，元数据按表写（见 assets/glossary/README.md）
   for lang in en ja zh es; do
     src="assets/glossary/glossary-$lang.tsv"

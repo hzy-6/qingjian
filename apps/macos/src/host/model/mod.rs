@@ -3,8 +3,10 @@
 //! 按键回调里永远只跑词级模型；模型的意见在停键 80 毫秒后请求、二三十毫秒后到，只换候选窗口里的整句候选，
 //! 用户翻过页或动过高亮就不打扰。前文优先用应用里光标前的文字（`refresh` 每次查询前给 Engine），应用给不出退回本会话历史。
 
+use std::path::PathBuf;
 use std::sync::mpsc::{TryRecvError, channel};
 
+use qingjian_core::sentence::SentenceScorer;
 use qingjian_neural::{CharScorer, NeuralError};
 
 mod rescore_monitor;
@@ -13,34 +15,62 @@ pub(super) use rescore_monitor::RescoreMonitor;
 
 use super::*;
 
+/// 后台加载的结果：Qwen GGUF（首选）或 `.qjm` 字级模型（兜底），接 Engine 时统一成 trait 对象。
+pub(super) type LoadedModel = Result<Box<dyn SentenceScorer>, String>;
+
+/// 要加载哪个模型文件。
+enum ModelChoice {
+    /// Qwen GGUF（llama.cpp 推理）。
+    Qwen(PathBuf),
+
+    /// `.qjm` 字级 Transformer（candle 推理）。
+    Char(PathBuf),
+}
+
 impl Host {
-    /// 在后台线程加载模型并预热（第一次前向要编译 Metal 内核，几百毫秒），加载完由 [`Self::attach_loaded_model`] 接上。
-    /// 没有模型文件就什么都不做。
+    /// 在后台线程加载模型并预热（第一次前向要编译 Metal 内核，几百毫秒到几秒），加载完由
+    /// [`Self::attach_loaded_model`] 接上。有 GGUF 用 Qwen，没有退回 `.qjm`，都没有就什么都不做。
     pub(super) fn load_local_model(&mut self) {
         if self.model_loader.is_some() || self.engine.has_sentence_scorer() {
             return;
         }
-        let Some(path) = paths::model_path() else {
+        let choice = if let Some(path) = paths::qwen_path() {
+            ModelChoice::Qwen(path)
+        } else if let Some(path) = paths::model_path() {
+            ModelChoice::Char(path)
+        } else {
             tracing::info!("没有本地整句模型文件，不重排");
             return;
         };
-        let (tx, rx) = channel::<Result<CharScorer, NeuralError>>();
+        let (tx, rx) = channel::<LoadedModel>();
         let spawned = std::thread::Builder::new()
             .name("qingjian-model-load".to_owned())
             .spawn(move || {
                 let started = std::time::Instant::now();
-                let loaded = CharScorer::load(&path).and_then(|scorer| {
-                    scorer.score("", &["的"])?;
-                    Ok(scorer)
+                let model = match &choice {
+                    ModelChoice::Qwen(path) => qingjian_qwen::QwenScorer::load(path)
+                        .map(|scorer| Box::new(scorer) as Box<dyn SentenceScorer>)
+                        .map_err(|error| error.to_string()),
+                    ModelChoice::Char(path) => CharScorer::load(path)
+                        .map(|scorer| Box::new(scorer) as Box<dyn SentenceScorer>)
+                        .map_err(|error: NeuralError| error.to_string()),
+                };
+                // 预热一次：真出问题（加载成功但打不了分）也在后台发现，别等用户第一键
+                let model = model.and_then(|scorer| match scorer.score("", &["的"]) {
+                    scores if !scores.is_empty() => Ok(scorer),
+                    _ => Err("预热打分没有返回结果".to_owned()),
                 });
-                if loaded.is_ok() {
+                let path = match &choice {
+                    ModelChoice::Qwen(path) | ModelChoice::Char(path) => path.display().to_string(),
+                };
+                if model.is_ok() {
                     tracing::info!(
-                        path = %path.display(),
+                        path = %path,
                         total_ms = started.elapsed().as_millis(),
                         "本地整句模型已加载并预热"
                     );
                 }
-                let _ = tx.send(loaded);
+                let _ = tx.send(model);
             });
         match spawned {
             Ok(_) => self.model_loader = Some(rx),
@@ -55,8 +85,7 @@ impl Host {
         };
         match rx.try_recv() {
             Ok(Ok(scorer)) => {
-                self.engine
-                    .set_async_sentence_scorer(Some(Box::new(scorer)));
+                self.engine.set_async_sentence_scorer(Some(scorer));
                 self.model_loader = None;
                 // 模型上线了：日志里补一条会话信息，之后的条目知道重排开着
                 let version = self.version.clone();
