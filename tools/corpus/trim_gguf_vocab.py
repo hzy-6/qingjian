@@ -108,12 +108,15 @@ def main(src, dst, keep, whitelist):
                      'tokenizer.ggml.padding_token_id', 'tokenizer.ggml.sep_token_id'):
             kv[2] = id_map.get(v, v)
 
-    embd = next(t for t in tensors if t[0] == 'token_embd.weight')
-    # GGUF dims 是 [ne0, ne1] = [hidden, vocab](ne0 是内存上连续的内维):一行词表占 ne0 个参数
-    hidden, vocab = embd[2][0], embd[2][1]
+    embd_idx = next(i for i, t in enumerate(tensors) if t[0] == 'token_embd.weight')
+    hidden, vocab = tensors[embd_idx][2][0], tensors[embd_idx][2][1]
     assert vocab == len(tokens), f"词表维 {vocab} 与 tokens {len(tokens)} 不符"
-    row_bytes = hidden // 32 * 34  # Q8_0:32 参数一块,每块 34 字节
-    embd[2] = [hidden, len(new_tokens)]
+    # 行宽按实测:张量总字节 ÷ 词表行数(对任意量化布局都成立;Q8_0 恰为 hidden/32×34,
+    # UD 混合量化的 embd 不是 Q8_0,按类型猜会错——0.8B 的 Q8 版与 2B 的 UD-Q4 版都用这条)
+    embd_size = sizes[embd_idx]
+    assert embd_size % vocab == 0, f"词嵌入字节数 {embd_size} 不能被 {vocab} 行整除"
+    row_bytes = embd_size // vocab
+    tensors[embd_idx][2] = [hidden, len(new_tokens)]
     embd_bytes = len(new_tokens) * row_bytes
 
     out = open(dst, 'wb')

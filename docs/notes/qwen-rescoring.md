@@ -144,14 +144,37 @@ Qwen+全套 60.2%(字准 90.5)、纯静态 52.2%——比 139 句集难得多、
 cargo run --release -p qingjian-cli --features qwen -- \
   --eval-text data/eval/sentences-frozen.tsv \
   --extra-dict data/generated/dicts/idioms.qj --extra-dict data/generated/dicts/it_computing.qj \
-  --qwen data/model/Qwen3.5-0.8B-Q8_0-text.gguf     # 盲评 92.1% / 99.3%(fill-in lm + 裁剪词表)
+  --qwen data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf  # 盲评 94.2% / 99.4%(2B + λ0.75 缺省)
 cargo run --release -p qingjian-cli --features qwen -- \
   --eval-text data/eval/corpus-ctx.tsv \
   --extra-dict data/generated/dicts/idioms.qj --extra-dict data/generated/dicts/it_computing.qj \
-  --qwen data/model/Qwen3.5-0.8B-Q8_0-text.gguf     # 大尺 895 句:60.2% / 90.5%
+  --qwen data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf  # 大尺 895 句:61.8% / 91.2%
 cargo run --release -p qingjian-cli --features qwen -- \
-  --replay <冻结的 input-log 快照> --qwen data/model/Qwen3.5-0.8B-Q8_0-text.gguf
+  --replay <冻结的 input-log 快照> --qwen data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf
 ```
 
-裸 `--qwen` 不带任何调参 flag 即出厂配置(λ 0.5 / cap 30 / gate 2 / margin 9 / 束宽 10 / ctx 128 全是缺省)。
+裸 `--qwen` 不带任何调参 flag 即出厂配置(λ 0.75 / cap 30 / gate 2 / margin 9 / 束宽 10 / ctx 128 全是缺省)。
 工具:`tools/corpus/lm_fillin.py`(lm 计数导出+fill-in 混合)、`tools/corpus/trim_gguf_vocab.py`(GGUF 词表裁剪)。
+
+## 第五轮:Qwen3.5-2B 对局 0.8B(2026-09-20,采纳 2B)
+
+用户提出试 "qwen3.5-2b-mlx-4bit"。MLX 是苹果的另一套推理格式,本仓栈是 llama.cpp(GGUF),等价物取
+unsloth 的 **UD-Q4_K_XL**(动态混合量化,同权重不同容器)。三智能体(量化调研 / 对局设计 / 预注册裁判)+ 主会话实测:
+
+- 2B 同为 qwen35 混合架构、同 248k 词表(eos=248046 与 0.8B 一致)——词表裁剪工具直接可用;
+  **裁剪工具修了通用性 bug:行宽改按实测(张量总字节 ÷ 词表行数),不再假设 Q8_0 布局**(UD 混合量化的
+  embd 非 Q8,旧算法产出损坏文件)。
+- 裸参数对局(同缺省 λ0.5):139 尺同分 92.1/99.3;**895 主尺 61.5/91.0 vs 0.8B 60.2/90.5**,
+  全量 miss 对账 2B 独有修好 17 / 翻坏 6,**McNemar 精确 p=0.035(显著)**;回放同分 89.3/86.0(零回归)。
+- 对称轻扫:cap40 与 cap30 逐数同分(2B 对 cap 不敏感);**λ0.75 在 895 上 61.8/91.2**,按纪律用
+  139+回放独立确认:**139 尺 94.2/99.4(历史新高,+2.1)**,回放词 89.5(1502,+3)、整句 85.4(−3,换位噪声带)。
+- **采纳:随包换 Qwen3.5-2B-UD-Q4_K_XL-text(1175MB),λ 缺省 0.5→0.75**(0.8B 移 data/model-archive 留档,
+  用回它建议 CLI 覆盖 --neural-weight 0.5)。
+
+| 尺 | 0.8B(λ0.5) | **2B(λ0.75)** | Δ |
+|---|---|---|---|
+| 895 主尺 | 60.2 / 90.5 | **61.8 / 91.2** | +1.6 / +0.7(p=0.035 裸参数口径) |
+| 139 冻结 | 92.1 / 99.3 | **94.2 / 99.4** | +2.1 / +0.1 |
+| 回放词 / 整句 | 89.3 / 86.0 | 89.5 / 85.4 | +3 / −3(噪声带) |
+| 延迟(139 同步) | 63 ms | 93 ms | +48%,壳内异步每键无感 |
+| 体积(裁后) | 672 MB | 1175 MB | +503 MB,app 1.3GB |

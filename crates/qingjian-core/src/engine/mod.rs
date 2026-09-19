@@ -335,9 +335,10 @@ const SENTENCE_SEGMENTATIONS: usize = 4;
 /// 而个人 n-gram / 敲错折扣喂出来的差距只有一两 nat——不该推翻 parser 首切，那是用户自己的读法习惯。
 const SENTENCE_ARBITRATION_MARGIN: f64 = 2.5;
 
-/// 神经重打分的缺省权重 λ（见 `Engine::neural_weight`）：整句评测集上 0.5 到 1.0 一样好、0.75 最高（见 docs/notes/neural-rescoring.md），
-/// 取 0.5 给个人 n-gram 留余量；回放里看到的「λ 大整句掉」是那把尺子的偏差。
-pub const NEURAL_WEIGHT: f64 = 0.5;
+/// 神经重打分的缺省权重 λ（见 `Engine::neural_weight`）。0.75：随包 Qwen3.5-2B 在 895 句混域主尺上扫出
+/// （0.5 时 61.5/91.0 → 0.75 时 61.8/91.2，139 尺 92.1 → 94.2），回放零回归（见 docs/notes/qwen-rescoring.md 第五轮）。
+/// 0.8B 时代是 0.5（它 0.75 更差），用回 0.8B / .qjm 时建议 CLI 覆盖 `--neural-weight 0.5`。
+pub const NEURAL_WEIGHT: f64 = 0.75;
 
 /// 单条路径允许的最大神经修正（nat），避免模型异常分数一次性压过词频和个人学习。
 /// 12 比 8 在整句评测上高 0.7 个点（路径集含分歧链后用得上更大的修正），真实日志回放带重排逐条一致。
