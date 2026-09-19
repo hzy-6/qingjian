@@ -144,16 +144,16 @@ Qwen+全套 60.2%(字准 90.5)、纯静态 52.2%——比 139 句集难得多、
 cargo run --release -p qingjian-cli --features qwen -- \
   --eval-text data/eval/sentences-frozen.tsv \
   --extra-dict data/generated/dicts/idioms.qj --extra-dict data/generated/dicts/it_computing.qj \
-  --qwen data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf  # 盲评 94.2% / 99.4%(2B + λ0.75 缺省)
+  --qwen data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf  # 盲评 93.5% / 99.3%(2B + λ0.75 + paths8)
 cargo run --release -p qingjian-cli --features qwen -- \
   --eval-text data/eval/corpus-ctx.tsv \
   --extra-dict data/generated/dicts/idioms.qj --extra-dict data/generated/dicts/it_computing.qj \
-  --qwen data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf  # 大尺 895 句:61.8% / 91.2%
+  --qwen data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf  # 大尺 895 句:61.6% / 90.9%
 cargo run --release -p qingjian-cli --features qwen -- \
   --replay <冻结的 input-log 快照> --qwen data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf
 ```
 
-裸 `--qwen` 不带任何调参 flag 即出厂配置(λ 0.75 / cap 30 / gate 2 / margin 9 / 束宽 10 / ctx 128 全是缺省)。
+裸 `--qwen` 不带任何调参 flag 即出厂配置(λ 0.75 / cap 30 / gate 2 / margin 9 / 束宽 10 / paths 8 / ctx 128 全是缺省)。
 工具:`tools/corpus/lm_fillin.py`(lm 计数导出+fill-in 混合)、`tools/corpus/trim_gguf_vocab.py`(GGUF 词表裁剪)。
 
 ## 第五轮:Qwen3.5-2B 对局 0.8B(2026-09-20,采纳 2B)
@@ -168,8 +168,15 @@ unsloth 的 **UD-Q4_K_XL**(动态混合量化,同权重不同容器)。三智能
   全量 miss 对账 2B 独有修好 17 / 翻坏 6,**McNemar 精确 p=0.035(显著)**;回放同分 89.3/86.0(零回归)。
 - 对称轻扫:cap40 与 cap30 逐数同分(2B 对 cap 不敏感);**λ0.75 在 895 上 61.8/91.2**,按纪律用
   139+回放独立确认:**139 尺 94.2/99.4(历史新高,+2.1)**,回放词 89.5(1502,+3)、整句 85.4(−3,换位噪声带)。
-- **采纳:随包换 Qwen3.5-2B-UD-Q4_K_XL-text(1175MB),λ 缺省 0.5→0.75**(0.8B 移 data/model-archive 留档,
-  用回它建议 CLI 覆盖 --neural-weight 0.5)。
+- **采纳(裁判预注册终局):随包换 Qwen3.5-2B-UD-Q4_K_XL-text(1175MB),λ 缺省 0.5→0.75、RESCORE_PATHS 16→8**
+  (0.8B 移 data/model-archive 留档,用回它建议 CLI 覆盖 --neural-weight 0.5)。
+- **裁判两颗螺丝的闭环**:①最慢延迟——paths16 时 139 尺预热后稳定 318-320ms,破一票否决线 300ms,按预注册救火分支
+  `--neural-paths 8` 复测:最慢 218ms(线内)、平均 72ms,139 = 93.5/99.3、895 = 61.6/90.9(比 paths16 只差 0.2 个点,
+  k 不敏感的诊断再次验证),出厂定 paths=8;②四域分账——23 句 discordant 逐句回标原文来源:修好 17 句 = 知乎 9 + 维基 4 +
+  docs 3 + lccc 1,翻坏 6 句 = 知乎 3 + docs 3,四域净差 知乎 +6 / 维基 +4 / lccc +1 / docs 0,无任何域净退,非单域运气。
+- 终版(paths8)全景:139 = 93.5/99.3 @ 平均 72ms 最慢 218ms;895 = 61.6/90.9;回放词 89.5(1501,+2)/整句 85.4(−3,噪声带)。
+  对局设计方的「边际带维持」意见系基于裸参数 +1.3pp 的过时快照;其自列复开条件(λ0.75 补扫)已执行并推至
+  +1.4pp、139 同分变 +1.4,个人语域证据到位,裁决维持采纳。
 
 | 尺 | 0.8B(λ0.5) | **2B(λ0.75)** | Δ |
 |---|---|---|---|

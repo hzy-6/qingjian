@@ -322,10 +322,10 @@ const PREDICTION_CANDIDATE_HINTS: usize = 5;
 /// 一次查询最多给壳多少条候选。同音字最多的音节也不到这个数，再往后都是长词，没人会翻到。
 const MAX_CANDIDATES: usize = 500;
 
-/// 神经重打分看 Viterbi 的前几条路径（16 条比 8 条多救回「你的邮箱」这类池深挡住的翻案，逐句零副作用）；
-/// 接了打分器时的缺省，`Engine::set_neural_paths` / CLI `--neural-paths` 可改（A/B 用；margin 与 k 要联扫，
-/// 见 docs/notes/qwen-rescoring.md）。
-pub const RESCORE_PATHS: usize = 16;
+/// 神经重打分看 Viterbi 的前几条路径。8:2B 上 16 条只多 0.2 个点,但 139 尺最慢单句 318→218 ms
+/// （预注册硬红线 300 ms,见 docs/notes/qwen-rescoring.md 第五轮救火分支）;`Engine::set_neural_paths` /
+/// CLI `--neural-paths` 可改——上探 16 要连延迟红线一起看。
+pub const RESCORE_PATHS: usize = 8;
 
 /// 整句候选参与跨切分比较的切分数：排最前的是贪心切分，语言模型时常更认可后面的（`bange` 的 `ban ge`），
 /// 只信第一支会把整句带偏；最多这几支都转一遍按分数挑（格子候选有缓存，多转的只是束搜索）。
