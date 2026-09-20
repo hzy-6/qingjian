@@ -145,6 +145,11 @@ pub struct Args {
     #[arg(long)]
     pub eval_save: Option<PathBuf>,
 
+    /// 将整句评测逐条写成机器可读 JSONL：包含原句、拼音、上下文、最终候选和重排池。
+    /// 用于 2B 教师蒸馏；必须与 --eval-text 一起使用。
+    #[arg(long, requires = "eval_text")]
+    pub eval_jsonl: Option<PathBuf>,
+
     /// 直接查询这些拼音后退出；不给则进入交互模式
     pub inputs: Vec<String>,
 }

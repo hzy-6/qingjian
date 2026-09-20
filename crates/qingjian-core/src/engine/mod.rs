@@ -339,7 +339,7 @@ const SENTENCE_SEGMENTATIONS: usize = 4;
 const SENTENCE_ARBITRATION_MARGIN: f64 = 2.5;
 
 /// 神经重打分的缺省权重 λ（见 `Engine::neural_weight`）。0.75：随包 Qwen3.5-2B 在 895 句混域主尺上扫出
-/// （0.5 时 61.5/91.0 → 0.75 时 61.8/91.2，139 尺 92.1 → 94.2），回放零回归（见 docs/notes/qwen-rescoring.md 第五轮）。
+/// （0.5 时 61.5/91.0 → 0.75 时 61.8/91.2）；出厂 paths=8 口径见 docs/notes/qwen-rescoring.md 第五轮。
 /// （历史上的 0.8B / 102M 模型用 0.5 更好。）
 pub const NEURAL_WEIGHT: f64 = 0.75;
 

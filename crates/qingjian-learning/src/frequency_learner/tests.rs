@@ -373,18 +373,38 @@ fn counts_decay_by_last_seen_date() {
     let ancient = format!("古词\t8\t{}", days_ago(300));
     learner.load_counts(&format!("新词\t6\n{old}\n{ancient}\n"));
     assert_eq!(learner.weight("新词"), 6, "没有日期的行照旧");
-    let d120 = days_ago(120);
-    eprintln!(
-        "DBG date={d120} days_since={:?}",
-        crate::frequency_learner::tables::days_since(&d120)
-    );
-    eprintln!("DBG weight={}", learner.weight("老词"));
     assert_eq!(
         learner.weight("老词"),
         4,
-        "120 天 ≈ 1.33 个半衰期,10 → 5 折成 3(向上取整后见半衰公式)"
+        "120 天 ≈ 1.33 个半衰期,10 衰减后四舍五入为 4"
     );
     assert!(learner.weight("古词") <= 1, "300 天前几乎衰减光");
+}
+
+/// 已折算的计数落盘后以今天为新基准，再加载不能因重启次数重复衰减；
+/// 今天重新选中的旧词也必须刷新基准日期。
+#[test]
+fn decayed_counts_round_trip_without_compounding() {
+    let dir = std::env::temp_dir().join(format!(
+        "qingjian-learning-decay-round-trip-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("user.tsv");
+    std::fs::write(&path, format!("老词\t10\t{}\n", days_ago(120))).unwrap();
+
+    let mut first = FrequencyLearner::from_path(&path).unwrap();
+    assert_eq!(first.weight("老词"), 4);
+    first.save_to(&path).unwrap();
+    let second = FrequencyLearner::from_path(&path).unwrap();
+    assert_eq!(second.weight("老词"), 4, "重启不能重复衰减");
+
+    let mut selected = FrequencyLearner::from_path(&path).unwrap();
+    selected.record(&candidate("老词"));
+    selected.save_to(&path).unwrap();
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.contains(&format!("老词\t5\t{}", super::tables::jiff_today())));
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// 算「N 天前」的日期字符串(本地时区)。

@@ -12,6 +12,7 @@ mod report;
 mod transcribe;
 
 use std::collections::HashSet;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -27,6 +28,7 @@ pub fn run(
     engine: &mut Engine,
     paths: &[PathBuf],
     save: Option<&Path>,
+    jsonl: Option<&Path>,
     show_misses: usize,
 ) -> Result<Report, EvalError> {
     let mut report = Report::default();
@@ -43,10 +45,45 @@ pub fn run(
         })?;
         tracing::info!(path = %path.display(), count = pairs.len(), "句子集已保存");
     }
+    let jsonl_target = jsonl.map(Path::to_owned);
+    let mut jsonl = jsonl
+        .map(|path| {
+            std::fs::File::create(path)
+                .map(BufWriter::new)
+                .map_err(|source| EvalError::Write {
+                    path: path.to_owned(),
+                    source,
+                })
+        })
+        .transpose()?;
     for pair in &pairs {
-        evaluate(engine, pair, &mut report, show_misses);
+        if let Some(record) = evaluate(engine, pair, &mut report, show_misses)
+            && let Some(writer) = &mut jsonl
+        {
+            serde_json::to_writer(&mut *writer, &record).map_err(EvalError::Json)?;
+            writer.write_all(b"\n").map_err(|source| EvalError::Write {
+                path: jsonl_target.clone().unwrap_or_default(),
+                source,
+            })?;
+        }
+    }
+    if let Some(writer) = &mut jsonl {
+        writer.flush().map_err(|source| EvalError::Write {
+            path: jsonl_target.unwrap_or_default(),
+            source,
+        })?;
     }
     Ok(report)
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DistillRecord {
+    gold: String,
+    pinyin: String,
+    context: String,
+    candidates: Vec<String>,
+    gold_rank: Option<usize>,
+    rerank_pool: Vec<String>,
 }
 
 /// 读全部文件，得到去重后的句子集：有制表符的文件按冻结格式读，其余当原始文本抽句、转拼音。
@@ -101,7 +138,12 @@ fn collect(
 /// 评一句：清空引擎状态、写入上文、喂拼音、看候选。
 /// 上文只喂 Qwen(经 history):静态 bigram 是按句切分统计的,跨句左词是分布外输入,
 /// 实测喂给静态反而 −0.5 个点(895 句混域尺),`Context::START` 就是正确的边界先验。
-fn evaluate(engine: &mut Engine, pair: &Pair, report: &mut Report, show_misses: usize) {
+fn evaluate(
+    engine: &mut Engine,
+    pair: &Pair,
+    report: &mut Report,
+    show_misses: usize,
+) -> Option<DistillRecord> {
     report.total += 1;
     engine.clear();
     engine.break_chain();
@@ -114,7 +156,7 @@ fn evaluate(engine: &mut Engine, pair: &Pair, report: &mut Report, show_misses: 
         Err(_) => {
             report.unparsable += 1;
             engine.clear();
-            return;
+            return None;
         }
     };
     // 异步重打分：像壳一样停顿后请求、等结果、再查一次；等的时间也算进查询耗时
@@ -127,7 +169,8 @@ fn evaluate(engine: &mut Engine, pair: &Pair, report: &mut Report, show_misses: 
     report.query_time += elapsed;
     report.slowest_query = report.slowest_query.max(elapsed);
     // 重排探针:正确句有没有送进模型、被往哪个方向翻
-    if let Some(probe) = engine.rerank_probe() {
+    let probe = engine.rerank_probe();
+    if let Some(probe) = &probe {
         report.probed += 1;
         if let Some(rank) = probe.pool.iter().position(|text| text == &pair.text) {
             report.oracle_hit += 1;
@@ -177,7 +220,34 @@ fn evaluate(engine: &mut Engine, pair: &Pair, report: &mut Report, show_misses: 
             )),
         ));
     }
+    let mut candidates = probe
+        .as_ref()
+        .map(|probe| probe.ranked.clone())
+        .unwrap_or_default();
+    if candidates.is_empty() {
+        candidates.extend(
+            items
+                .iter()
+                .filter(|candidate| candidate.text.chars().count() == length)
+                .map(|candidate| candidate.text.clone()),
+        );
+        candidates.dedup();
+        candidates.truncate(16);
+    }
+    let gold_rank = candidates
+        .iter()
+        .position(|candidate| candidate == &pair.text)
+        .map(|rank| rank + 1);
+    let record = DistillRecord {
+        gold: pair.text.clone(),
+        pinyin: pair.pinyin.clone(),
+        context: pair.context.clone(),
+        candidates,
+        gold_rank,
+        rerank_pool: probe.map_or_else(Vec::new, |probe| probe.pool),
+    };
     engine.clear();
+    Some(record)
 }
 
 /// 整句评测的错误。
@@ -196,4 +266,7 @@ pub enum EvalError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("cannot encode evaluation JSONL: {0}")]
+    Json(#[source] serde_json::Error),
 }

@@ -49,7 +49,8 @@ pub struct FrequencyLearner {
     /// 词 → 用户选择次数(加载时已按半衰期折算过)。
     counts: HashMap<String, u32>,
 
-    /// 词 → 最后选中日期(YYYY-MM-DD,写入 user.tsv 第三列;空表加载的旧行没有)。
+    /// 词 → 当前计数的基准日期（YYYY-MM-DD，写入 user.tsv 第三列）。
+    /// 加载时会把旧计数折算到今天并把基准日重置为今天，避免落盘后再次按完整年龄衰减。
     last_seen: HashMap<String, String>,
 
     /// 自上次保存后是否有新记录。
@@ -112,6 +113,7 @@ impl FrequencyLearner {
     /// 从 `词\t次数` 读选择次数，返回跳过的坏行数。
     fn load_counts(&mut self, source: &str) -> usize {
         let mut skipped = 0;
+        let today = tables::jiff_today();
         for line in data_lines(source) {
             let mut fields = line.split('\t');
             let (Some(text), Some(count)) = (fields.next(), fields.next()) else {
@@ -131,8 +133,9 @@ impl FrequencyLearner {
                 .unwrap_or(count);
             if decayed > 0 {
                 self.counts.insert(text.to_owned(), decayed);
-                if let Some(date) = seen.filter(|date| !date.is_empty()) {
-                    self.last_seen.insert(text.to_owned(), date.to_owned());
+                if seen.is_some_and(|date| !date.is_empty()) {
+                    // `decayed` 已经是今天口径；以后若因别的词变动而整表落盘，必须以今天为新基准。
+                    self.last_seen.insert(text.to_owned(), today.clone());
                 }
             }
         }
@@ -201,7 +204,7 @@ impl FrequencyLearner {
 
     pub fn save_to(&mut self, path: impl AsRef<Path>) -> Result<(), LearningError> {
         let today = tables::jiff_today();
-        // 本会话动过的词(含新词)刷新为今天,旧日期原样保留——下次加载按它折算
+        // 没日期的旧格式行第一次写回时以今天为计数基准。
         for text in self.counts.keys() {
             self.last_seen
                 .entry(text.clone())
@@ -212,7 +215,7 @@ impl FrequencyLearner {
         write_atomic(path.as_ref(), |file| {
             writeln!(
                 file,
-                "# 青简用户词频：词\t选择次数\t最后选中日期(供 90 天半衰期折算)"
+                "# 青简用户词频：词\t选择次数\t计数基准日期(供 90 天半衰期折算)"
             )?;
             for (text, count) in rows {
                 let date = self.last_seen.get(text).map_or("", String::as_str);

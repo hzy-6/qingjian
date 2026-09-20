@@ -5,6 +5,8 @@ use super::*;
 impl Learner for FrequencyLearner {
     fn record(&mut self, candidate: &Candidate) {
         *self.counts.entry(candidate.text.clone()).or_default() += 1;
+        self.last_seen
+            .insert(candidate.text.clone(), tables::jiff_today());
         self.dirty = true;
         tracing::debug!(text = %candidate.text, "记录用户选择");
     }

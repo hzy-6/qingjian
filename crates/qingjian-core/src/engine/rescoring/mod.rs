@@ -84,6 +84,7 @@ impl Engine {
             if paths.len() == 1 {
                 *self.rerank_probe.borrow_mut() = Some(RerankProbe {
                     pool: vec![paths[0].text.clone()],
+                    ranked: vec![paths[0].text.clone()],
                     top_before: Some(paths[0].text.clone()),
                     top_after: Some(paths[0].text.clone()),
                 });
@@ -181,6 +182,7 @@ impl Engine {
         });
         *self.rerank_probe.borrow_mut() = Some(RerankProbe {
             pool: probe_pool,
+            ranked: paths.iter().map(|path| path.text.clone()).collect(),
             top_before,
             top_after: paths.first().map(|path| path.text.clone()),
         });

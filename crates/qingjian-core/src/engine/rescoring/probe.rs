@@ -5,6 +5,9 @@ pub struct RerankProbe {
     /// 重排池里的路径文本,按进入时的静态排名排。
     pub pool: Vec<String>,
 
+    /// 同一批路径经神经模型重排后的顺序；蒸馏导出用它取得 hard negatives。
+    pub ranked: Vec<String>,
+
     /// 重排前(静态)排第一的路径;池只有一条或没接打分器时与重排后一致。
     pub top_before: Option<String>,
 

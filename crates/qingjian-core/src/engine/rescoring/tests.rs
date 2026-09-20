@@ -159,6 +159,7 @@ fn the_probe_records_pool_and_flip_directions() {
     engine.rescore_paths(&mut paths);
     let probe = engine.rerank_probe().unwrap();
     assert_eq!(probe.pool, ["开饭", "开放"]);
+    assert_eq!(probe.ranked, ["开放", "开饭"]);
     assert_eq!(probe.top_before.as_deref(), Some("开饭"));
     assert_eq!(probe.top_after.as_deref(), Some("开放"));
     // 池只有一条的早退也记(oracle 统计要知道"根本没得选"的句子)
@@ -166,7 +167,20 @@ fn the_probe_records_pool_and_flip_directions() {
     engine.rescore_paths(&mut single);
     let probe = engine.rerank_probe().unwrap();
     assert_eq!(probe.pool, ["开发"]);
+    assert_eq!(probe.ranked, ["开发"]);
     assert_eq!(probe.top_before, probe.top_after);
+}
+
+#[test]
+fn a_new_query_clears_a_stale_probe() {
+    let mut engine =
+        engine().with_sentence_scorer(Box::new(Prefers("开放")), Some(0.5), None, None);
+    let mut paths = vec![path("开饭", -10.0), path("开放", -11.0)];
+    engine.rescore_paths(&mut paths);
+    assert!(engine.rerank_probe().is_some());
+    engine.set_input("not-pinyin");
+    let _ = engine.query();
+    assert!(engine.rerank_probe().is_none());
 }
 
 #[test]

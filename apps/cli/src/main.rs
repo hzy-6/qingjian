@@ -55,6 +55,7 @@ fn run() -> Result<(), CliError> {
             &mut engine,
             &args.eval_text,
             args.eval_save.as_deref(),
+            args.eval_jsonl.as_deref(),
             args.misses,
         )?;
         print!("{report}");

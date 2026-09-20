@@ -2,9 +2,6 @@
 
 use super::*;
 
-/// 自适应扩池的上限:静态拿不准时翻倍但不超过这个数(延迟红线内的最大召回)。
-const ADAPTIVE_POOL_MAX: usize = 16;
-
 mod english_tail;
 mod result;
 mod snapshot;
@@ -21,6 +18,7 @@ impl Engine {
     /// 上屏之后接着组句；见 [`Composition::scope`]。
     pub fn query(&self) -> Result<Query, ParseError> {
         self.last_rescored.set(false);
+        *self.rerank_probe.borrow_mut() = None;
         let mut query = match self.query_inner() {
             Ok(query) => query,
             Err(error) => {
@@ -647,28 +645,6 @@ impl Engine {
             |index, syllable| expanded.cost(index, syllable),
             &mut self.span_cache.borrow_mut(),
         );
-        // 自适应扩池:前二静态分差低于阈值说明静态自己拿不准,翻倍重取路径(格子缓存命中,重跑便宜)。
-        // 简单句(分差悬殊)维持 paths=8 的延迟预算,高歧义句才多花截断成本换召回。
-        let wide_k = (k * 2).min(ADAPTIVE_POOL_MAX);
-        if let Some((first, second)) = paths.first().zip(paths.get(1))
-            && wide_k > k
-            && first.score - second.score < sentence::UNCERTAIN_STATIC_GAP
-        {
-            let wider = sentence::convert_paths(
-                &dictionaries,
-                &expanded.positions(),
-                whole,
-                wide_k,
-                sentence::SPAN_CANDIDATES,
-                sentence::Context::START,
-                &*self.language_model,
-                self.personal(),
-                |text| self.learner.weight(text),
-                |index, syllable| expanded.cost(index, syllable),
-                &mut self.span_cache.borrow_mut(),
-            );
-            return (!wider.is_empty()).then_some(wider);
-        }
         (!paths.is_empty()).then_some(paths)
     }
 
