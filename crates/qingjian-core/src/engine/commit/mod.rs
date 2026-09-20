@@ -6,8 +6,9 @@ use super::input_log::{InputLogEntry, InputLogger, InputSource};
 use super::learning::Learner;
 use super::query::EnglishTail;
 use super::{
-    AUTO_WORD_MAX_CHARS, AUTO_WORD_THRESHOLD, AUTO_WORD_THRESHOLD_SAME_BUFFER,
-    EXPLICIT_TRANSITION_WEIGHT, Engine, choice_key, segment_longest_prefix,
+    AUTO_PHRASE_THRESHOLD, AUTO_WORD_MAX_CHARS, AUTO_WORD_THRESHOLD,
+    AUTO_WORD_THRESHOLD_SAME_BUFFER, EXPLICIT_TRANSITION_WEIGHT, Engine, choice_key,
+    segment_longest_prefix,
 };
 use crate::candidate::{Candidate, CandidateKind, CandidateList, Language};
 use crate::correction::typo;
@@ -547,30 +548,52 @@ impl Engine {
         self.chain.advance(text, syllables, buffer_left);
     }
 
-    /// 上一个词 + 这个词合成用户词的条件见 [`AUTO_WORD_THRESHOLD`]。
+    /// 最近两段或三段显式选择合成用户词。两段沿用原门槛；跨缓冲区的三段要求四次，
+    /// 同一缓冲区则沿用更强的两次证据。最多四个汉字，避免把普通长句误收成词。
     pub(super) fn try_auto_word(&mut self, text: &str, syllables: &[String], threshold: u32) {
         let Some(previous) = self.chain.previous().map(str::to_owned) else {
             return;
         };
-        let joined = format!("{previous}{text}");
-        let chars = joined.chars().count();
         let mut joined_syllables = self.chain.previous_syllables().to_vec();
         joined_syllables.extend(syllables.iter().cloned());
-        if chars > AUTO_WORD_MAX_CHARS || chars != joined_syllables.len() {
-            return;
-        }
         // 这条转移刚记过，计数已含本次；阈值按「选了几次」算，计数是按份记的
         let seen = self
             .learner
             .user_ngram()
             .map_or(0, |b| b.pair(Some(&previous), text));
-        if seen < threshold * EXPLICIT_TRANSITION_WEIGHT {
+        if seen >= threshold * EXPLICIT_TRANSITION_WEIGHT {
+            self.learn_joined_word(format!("{previous}{text}"), joined_syllables.clone());
+        }
+
+        let Some(earlier) = self.chain.earlier().map(str::to_owned) else {
+            return;
+        };
+        let triple_threshold = if self.chain.same_buffer() {
+            threshold
+        } else {
+            AUTO_PHRASE_THRESHOLD
+        };
+        let seen = self
+            .learner
+            .user_ngram()
+            .map_or(0, |model| model.triple(Some(&earlier), &previous, text));
+        if seen < triple_threshold * EXPLICIT_TRANSITION_WEIGHT {
+            return;
+        }
+        let mut triple_syllables = self.chain.earlier_syllables().to_vec();
+        triple_syllables.extend(joined_syllables);
+        self.learn_joined_word(format!("{earlier}{previous}{text}"), triple_syllables);
+    }
+
+    fn learn_joined_word(&mut self, text: String, syllables: Vec<String>) {
+        let chars = text.chars().count();
+        if chars > AUTO_WORD_MAX_CHARS || chars != syllables.len() {
             return;
         }
         let candidate = Candidate {
-            text: joined,
+            text,
             kind: CandidateKind::Chinese,
-            syllables: joined_syllables,
+            syllables,
             reading: None,
             translation: None,
         };

@@ -8,8 +8,8 @@ pub struct CommitChain {
     /// 上一个上屏的中文词及其音节；`None` 表示下一个词在句首。
     previous: Option<(String, Vec<String>)>,
 
-    /// 上一个词之前的那个词；`None` 表示上一个词在句首。
-    earlier: Option<String>,
+    /// 上一个词之前的那个词及其音节；`None` 表示上一个词在句首。
+    earlier: Option<(String, Vec<String>)>,
 
     /// 上一个词上屏后缓冲区里还留着拼音：下一个词若紧接着从同一段拼音里选出，两个词本来是一起打的。
     same_buffer: bool,
@@ -32,17 +32,27 @@ impl CommitChain {
         self.previous.as_ref().map_or(&[], |(_, s)| s.as_slice())
     }
 
+    /// 上一个词之前的那个词（若有）。
+    pub fn earlier(&self) -> Option<&str> {
+        self.earlier.as_ref().map(|(text, _)| text.as_str())
+    }
+
+    /// 上一个词之前的那个词的音节。
+    pub fn earlier_syllables(&self) -> &[String] {
+        self.earlier.as_ref().map_or(&[], |(_, s)| s.as_slice())
+    }
+
     /// 下一个词的上文：前一个词与再前一个词。
     pub fn context(&self) -> Context<'_> {
         Context {
             previous: self.previous(),
-            earlier: self.earlier.as_deref(),
+            earlier: self.earlier(),
         }
     }
 
     /// 链上是否有这个词（作为前一个或再前一个）。
     pub fn mentions(&self, text: &str) -> bool {
-        self.previous() == Some(text) || self.earlier.as_deref() == Some(text)
+        self.previous() == Some(text) || self.earlier() == Some(text)
     }
 
     /// 下一个词是否与上一个词出自同一段拼音。
@@ -52,7 +62,7 @@ impl CommitChain {
 
     /// 记下刚上屏的词；`buffer_left` 是上屏后缓冲区里是否还有拼音。
     pub fn advance(&mut self, text: &str, syllables: &[String], buffer_left: bool) {
-        self.earlier = self.previous.take().map(|(text, _)| text);
+        self.earlier = self.previous.take();
         self.previous = Some((text.to_owned(), syllables.to_vec()));
         self.same_buffer = buffer_left;
         self.buffer_words

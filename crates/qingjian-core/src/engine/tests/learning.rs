@@ -478,6 +478,43 @@ fn commits_feed_the_personal_bigram_and_form_words() {
     assert_eq!(shared.lock().unwrap().0, ["开发先", "咖啡开"]);
 }
 
+/// 三段短语比两段要求更多重复证据：分开输入四次后才进入用户词，偶然说一遍不会污染词库。
+#[test]
+fn repeated_three_part_phrase_becomes_a_user_word() {
+    let dictionary = Dictionary::parse("我\two\t10000\n想\txiang\t9000\n要\tyao\t8000\n").unwrap();
+    let shared = Arc::new(Mutex::new((Vec::new(), sentence::UserNgram::default())));
+    let learner = WordLearner {
+        shared: Arc::clone(&shared),
+        ..WordLearner::default()
+    };
+    let mut engine = Engine::new(dictionary).with_learner(Box::new(learner));
+    let pick = |engine: &mut Engine, input: &str, text: &str| {
+        engine.set_input(input);
+        let candidate = engine
+            .query()
+            .unwrap()
+            .candidates
+            .items
+            .into_iter()
+            .find(|candidate| candidate.text == text)
+            .unwrap();
+        engine.commit(&candidate);
+    };
+
+    for round in 1..=4 {
+        pick(&mut engine, "wo", "我");
+        pick(&mut engine, "xiang", "想");
+        pick(&mut engine, "yao", "要");
+        let learned = &shared.lock().unwrap().0;
+        assert_eq!(
+            learned.iter().any(|word| word == "我想要"),
+            round == 4,
+            "round {round}"
+        );
+        engine.punctuate('。');
+    }
+}
+
 #[test]
 fn committing_the_translation_learns_the_word_and_returns_the_gloss() {
     struct KaifaTranslator;

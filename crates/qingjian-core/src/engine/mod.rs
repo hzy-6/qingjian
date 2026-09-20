@@ -307,6 +307,9 @@ const AUTO_WORD_THRESHOLD_SAME_BUFFER: u32 = 2;
 /// 分两段打的（`qing` 选 青、再打 `jian` 选 简）信号弱一些，要三次，免得 了我 这类虚词接续也成词。
 const AUTO_WORD_THRESHOLD: u32 = 3;
 
+/// 分开输入的三段短语证据要比两段更强，避免把偶然连续输入的三个单字造成用户词。
+const AUTO_PHRASE_THRESHOLD: u32 = 4;
+
 /// 退格撤销最多回看几次上屏：删掉「沃德 书」两个词再重打时，要能找到两个词之前的那一次。
 const RECENT_COMMITS: usize = 4;
 
