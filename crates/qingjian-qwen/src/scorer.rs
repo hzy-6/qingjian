@@ -42,7 +42,7 @@ pub struct QwenScorer {
 unsafe impl Send for QwenScorer {}
 
 impl QwenScorer {
-    /// 加载 GGUF 模型。`path` 是 llama.cpp 量化文件（如 `Qwen3.5-0.8B-Q8_0.gguf`）。
+    /// 加载 GGUF 模型。`path` 是 llama.cpp 量化文件（如 `Qwen3.5-2B-UD-Q4_K_XL-text.gguf`）。
     pub fn load(path: &Path) -> Result<Self, QwenError> {
         if !path.is_file() {
             return Err(QwenError::NotFound(path.to_owned()));
@@ -294,8 +294,8 @@ mod tests {
 
     /// 本机下载的 Qwen GGUF（`data/model/`，gitignore）；没有就跳过。
     fn shipped_gguf() -> Option<std::path::PathBuf> {
-        let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/model/Qwen3.5-0.8B-Q8_0.gguf");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf");
         path.is_file().then_some(path)
     }
 
@@ -318,10 +318,10 @@ mod tests {
             "{scores:?}"
         );
         assert!(scores[0] > scores[1] + 2.0, "{scores:?}");
-        // 单独打与批量打一致（多序列与单序列走不同的 Metal 归约核，长句的浮点差到千分位）
+        // 单独打与批量打一致（多序列与单序列走不同的 Metal 归约核；2B 的浮点差到百分位边缘，容差 1e-2）
         let alone = scorer.score_inner("我今天想去", &["伤害"]).unwrap();
         assert!(
-            (alone[0] - scores[1]).abs() < 5e-3,
+            (alone[0] - scores[1]).abs() < 1e-2,
             "{alone:?} vs {scores:?}"
         );
         // 空前文也能打分
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(batched.len(), 40);
         let single = scorer.score_inner("前文", &[refs[7]]).unwrap();
         assert!(
-            (batched[7] - single[0]).abs() < 5e-3,
+            (batched[7] - single[0]).abs() < 1e-2,
             "{} vs {}",
             batched[7],
             single[0]
@@ -343,12 +343,12 @@ mod tests {
         let empty = scorer.score_inner("前文", &["", "上海"]).unwrap();
         assert_eq!(empty[0], 0.0);
         assert!(empty[1] < 0.0);
-        // 双向：空后文走快速路径（与 score 等值，多序列与单序列的 Metal 归约有 1e-3 量级浮点差）
+        // 双向：空后文走快速路径（与 score 等值；多序列与单序列的 Metal 归约在 2B 上浮点差到 1e-2 边缘）
         use qingjian_core::sentence::SentenceScorer as _;
         let plain = scorer.score_with_after("我今天想去", "", &["上海"]);
         assert_eq!(plain.len(), 1);
         assert!(
-            (plain[0] - scores[0]).abs() < 5e-3,
+            (plain[0] - scores[0]).abs() < 1e-2,
             "{plain:?} vs {scores:?}"
         );
         let both = scorer.score_with_after("我今天想去", "吃饭", &["上海", "商量"]);

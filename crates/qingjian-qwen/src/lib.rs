@@ -1,6 +1,6 @@
 //! Qwen 小模型的本地推理（llama.cpp）：给整句路径按 BPE token 打 log 概率。
 //!
-//! 加载 GGUF（如 `Qwen3.5-0.8B-Q8_0.gguf`），给「光标前文 + 候选文本」按 token 累加 log 概率，
+//! 加载 GGUF（如 `Qwen3.5-2B-UD-Q4_K_XL-text.gguf`），给「光标前文 + 候选文本」按 token 累加 log 概率，
 //! 实现 Core 的 [`SentenceScorer`]，与字级 Transformer（`qingjian-neural`）互换着做整句重打分。
 //!
 //! 需 `runtime` feature（编译 llama.cpp，Apple GPU 加速；`QINGJIAN_QWEN_GPU_LAYERS=0` 可强制纯 CPU）；

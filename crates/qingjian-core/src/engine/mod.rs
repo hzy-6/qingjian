@@ -337,7 +337,7 @@ const SENTENCE_ARBITRATION_MARGIN: f64 = 2.5;
 
 /// 神经重打分的缺省权重 λ（见 `Engine::neural_weight`）。0.75：随包 Qwen3.5-2B 在 895 句混域主尺上扫出
 /// （0.5 时 61.5/91.0 → 0.75 时 61.8/91.2，139 尺 92.1 → 94.2），回放零回归（见 docs/notes/qwen-rescoring.md 第五轮）。
-/// 0.8B 时代是 0.5（它 0.75 更差），用回 0.8B / .qjm 时建议 CLI 覆盖 `--neural-weight 0.5`。
+/// 更早的 0.8B / 102M 模型用 0.5 更好，切回它们时建议 CLI 覆盖 `--neural-weight 0.5`。
 pub const NEURAL_WEIGHT: f64 = 0.75;
 
 /// 单条路径允许的最大神经修正（nat），避免模型异常分数一次性压过词频和个人学习。
@@ -349,13 +349,13 @@ pub const NEURAL_MAX_ADJUSTMENT: f64 = 12.0;
 /// 壳里是停顿后异步重排，每键不受影响），回放与 8 逐条一致。5 会漏掉词库新补词的翻案。
 pub const NEURAL_MARGIN: f64 = 9.0;
 
-/// 重打分给模型看的前文：本次会话最近上屏的这么多个字符。128：Qwen3.5-0.8B 接管重打分后回放整句 +0.4 个点
+/// 重打分给模型看的前文：本次会话最近上屏的这么多个字符。128：Qwen 接管重打分后回放整句 +0.4 个点
 /// （见 docs/notes/qwen-rescoring.md），壳里读应用光标前文的长度也跟着它走（`RESCORE_LOOKBACK`）。
 pub const RESCORE_CONTEXT_CHARS: usize = 128;
 
 /// 个人证据保护闸的倍率：神经要翻掉一条老排名靠前的路径时，两边的神经修正差必须不小于
 /// `gate × 守成路径的个人证据优势`（路径分减静态分——个人 n-gram、用户加分、代价那部分）。
-/// 0 不保护；缺省 2 是 Qwen3.5-0.8B 重打分在冻结日志回放上扫出来的：整句 86.8 → 87.1，词只掉 0.1 个点，
+/// 0 不保护；缺省 2 是 Qwen 重打分在冻结日志回放上扫出来的：整句 86.8 → 87.1，词只掉 0.1 个点，
 /// 3 以上开始挡掉词的翻正（eval 冷启动没有个人数据，闸只影响回放与真实使用；调参记录见 docs/notes/qwen-rescoring.md）。
 pub const NEURAL_GATE: f64 = 2.0;
 

@@ -74,7 +74,7 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 ## crates/qingjian-qwen
 
 `QwenScorer`，Core `sentence::SentenceScorer` trait 的另一个实现：llama.cpp（`llama-cpp-2` 0.1.156，feature `runtime` 门控，
-不开是空壳、默认构建与 CI 不拉 C++ 依赖）加载 Qwen3.5-0.8B 的 GGUF（`data/model/Qwen3.5-0.8B-Q8_0.gguf`，774 MB，gitignore），
+不开是空壳、默认构建与 CI 不拉 C++ 依赖）加载 Qwen3.5-2B 的 GGUF（`data/model/Qwen3.5-2B-UD-Q4_K_XL-text.gguf`，1.1 GB，gitignore，词表已裁剪），
 给「前文 + 整句」按 BPE token 累加 log 概率，Metal 加速，双向上下文与修正建议（`max_adjustment` 30 nat）。
 每条候选拼上前文各自成一个序列、一次 decode 打一批（超过 31 条或 480 token 切批），打完 `clear_kv_cache` 整体重算——
 Qwen3.5 是注意力 + SSM 混合架构，`seq_cp` / 中间回卷都不可用（坑与调参记录见 `docs/notes/qwen-rescoring.md`）。
@@ -88,7 +88,7 @@ CLI `--qwen <gguf>`（与 `--neural` 互斥，共用 `--neural-*`，要 `--featu
 `model.safetensors` + `config.json` + `vocab.json`），给「前文 + 整句」按字累加 log 概率；前文的每层 K / V 缓存（`PrefixCache`），
 同一段前文只算一次，每个候选只算自己那几个字（64 字前文 × 8 条 28 ms，Metal）。features `accelerate` / `metal` 换后端，壳用 `metal`。
 
-Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_PATHS` = 8 条路径按 `路径分 + λ·(神经分 − 静态二元分)` 重排（λ `NEURAL_WEIGHT` 0.75（Qwen3.5-2B 在 895 混域尺扫出，0.8B 时代是 0.5），
+Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_PATHS` = 8 条路径按 `路径分 + λ·(神经分 − 静态二元分)` 重排（λ `NEURAL_WEIGHT` 0.75（Qwen3.5-2B 在 895 混域尺扫出；更早的模型用 0.5），
 路径集含分歧链：Viterbi 按「结尾词」取路径时每个词只带最优前驱链，前几名全是同一主干只换末字的近重复。
 分歧链 = 最优链上任意节点换它的次优前驱（`viterbi.rs` 的 `back2`），末位的（`雨下得很大` 对 `余下的很大`，神经分差 11 nat）
 与中段的（`需要[再|在]研究`）都进池；分歧只在 k > 1 时生成——它们按全分复活被束宽剪掉的路径，自己当首选不如束内最优稳（真实回放 -1.6 个点），交给重排器再判才有净收益。
