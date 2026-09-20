@@ -49,16 +49,25 @@ pub fn dicts_dir() -> Option<PathBuf> {
     Some(dir)
 }
 
-/// Qwen GGUF（llama.cpp）：用户目录与包内 `model/` 目录里有几份按文件名取最小的一份
-/// （`read_dir` 不保证顺序，显式取 min 与 bundle.sh 的字典序一致）。
+/// Qwen GGUF（llama.cpp）：用户目录与包内 `model/` 目录里挑选规则与 bundle.sh 一致——
+/// 裁剪过的 `*-text.gguf` 优先、同档按文件名取最小（`read_dir` 不保证顺序，显式排序）。
 pub fn qwen_path() -> Option<PathBuf> {
     fn first_gguf(dir: &Path) -> Option<PathBuf> {
-        std::fs::read_dir(dir)
+        let mut ggufs: Vec<PathBuf> = std::fs::read_dir(dir)
             .ok()?
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
             .filter(|path| path.extension().is_some_and(|ext| ext == "gguf"))
-            .min_by_key(|path| path.file_name().map(std::ffi::OsStr::to_owned))
+            .collect();
+        ggufs.sort_by_key(|path| {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            // false 排在 true 前:裁剪版(-text)优先,再按文件名
+            (!name.contains("-text."), name)
+        });
+        ggufs.into_iter().next()
     }
     first_gguf(&user_data_dir()?.join("model")).or_else(|| {
         resources_dir()
