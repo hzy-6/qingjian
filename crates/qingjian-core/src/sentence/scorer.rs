@@ -10,7 +10,7 @@ pub trait SentenceScorer: Send {
         self.score(before, texts)
     }
 
-    /// 模型自己建议的单条路径最大神经修正（nat）：训练侧知道该被信任多少，写在模型文件里。
+    /// 模型自己建议的单条路径最大神经修正（nat）:打分器声明「该被信多少」（当前实现是推理侧按盲评扫出的经验值）。
     /// 模型没给建议时是 `None`，用引擎的缺省上限 [`crate::NEURAL_MAX_ADJUSTMENT`]。
     fn max_adjustment(&self) -> Option<f64> {
         None

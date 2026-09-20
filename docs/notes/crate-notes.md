@@ -78,32 +78,9 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 给「前文 + 整句」按 BPE token 累加 log 概率，Metal 加速，双向上下文与修正建议（`max_adjustment` 30 nat）。
 每条候选拼上前文各自成一个序列、一次 decode 打一批（超过 31 条或 480 token 切批），打完 `clear_kv_cache` 整体重算——
 Qwen3.5 是注意力 + SSM 混合架构，`seq_cp` / 中间回卷都不可用（坑与调参记录见 `docs/notes/qwen-rescoring.md`）。
-空前文退 BOS/EOS（qwen35 没设 `dec_start_token_id`，是 -1）。壳的装配首选 GGUF、没有退 `.qjm`（`apps/macos` 的 `host/model` 与 `paths::qwen_path`）；
-CLI `--qwen <gguf>`（与 `--neural` 互斥，共用 `--neural-*`，要 `--features qwen` 编译）。Engine 侧的新缺省:`NEURAL_GATE` = 2（个人证据保护闸）、
+空前文退 BOS/EOS（qwen35 没设 `dec_start_token_id`，是 -1）。壳的装配只认 GGUF（用户目录 > 包内,`apps/macos` 的 `host/model` 与 `paths::qwen_path`）；
+CLI `--qwen <gguf>`（要 `--features qwen` 编译,参数族 `--neural-*`）。Engine 侧的新缺省:`NEURAL_GATE` = 2（个人证据保护闸）、
 `RESCORE_CONTEXT_CHARS` = 128，见 `docs/notes/qwen-rescoring.md`。
-
-## crates/qingjian-neural
-
-`CharScorer`，Core `sentence::SentenceScorer` trait 的实现：candle 加载字级 Transformer（GPT-2 风格 decoder，训练仓库（本地 `../train`，私有，不在本仓库）导出的
-`model.safetensors` + `config.json` + `vocab.json`），给「前文 + 整句」按字累加 log 概率；前文的每层 K / V 缓存（`PrefixCache`），
-同一段前文只算一次，每个候选只算自己那几个字（64 字前文 × 8 条 28 ms，Metal）。features `accelerate` / `metal` 换后端，壳用 `metal`。
-
-Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_PATHS` = 8 条路径按 `路径分 + λ·(神经分 − 静态二元分)` 重排（λ `NEURAL_WEIGHT` 0.75（Qwen3.5-2B 在 895 混域尺扫出；更早的模型用 0.5），
-路径集含分歧链：Viterbi 按「结尾词」取路径时每个词只带最优前驱链，前几名全是同一主干只换末字的近重复。
-分歧链 = 最优链上任意节点换它的次优前驱（`viterbi.rs` 的 `back2`），末位的（`雨下得很大` 对 `余下的很大`，神经分差 11 nat）
-与中段的（`需要[再|在]研究`）都进池；分歧只在 k > 1 时生成——它们按全分复活被束宽剪掉的路径，自己当首选不如束内最优稳（真实回放 -1.6 个点），交给重排器再判才有净收益。
-个人 n-gram / 用户加分 / 代价不动），分走「前文 + 文本 → 神经分」缓存 `NeuralCache`；同步打分器（`with_sentence_scorer`，CLI 评测）当场补分，
-异步的（`with_async_sentence_scorer`，后台线程 `RescoreWorker`）查询不等模型：缺分的记下来，壳停键后 `request_rescoring`、`poll_rescoring` 到了再 `query` 一次。
-前文优先用壳给的应用光标前文（`set_rescoring_context` / `set_rescoring_surrounding` 给前 + 后），没有用本会话最近 64 个上屏字符。
-CLI `--neural <目录或 .qjm>`（`--neural-weight` / `--neural-margin` / `--neural-context` / `--neural-max-adjustment` / `--neural-async`）。
-
-稳定性与失效：模型分数非有限（NaN / ±inf）的路径跳过调整、保持原顺序分量（NaN 会穿过 `clamp` 毒掉排序比较器）；请求带单调递增序号，
-`poll_rescoring` 只收不小于已发出最大序号的结果——上下文字符串恰好绕回旧值的迟到结果（ABA）也不收，相同 (前文, 后文, 文本) 的重复请求仍真实执行；
-删空 / 清空缓冲区（`backspace` 等）显式作废缓存（`NeuralCache::clear`），删掉重打时同文本重新问模型。
-单条路径的最大神经修正（nat）可配置：用户配置（`Engine::set_neural_max_adjustment` / 配置 `[model] max_adjustment` / CLI）优先，
-其次模型文件 `config.json` 自带的 `max_adjustment` 建议（`SentenceScorer::max_adjustment`，旧 `.qjm` 没有这个字段，加载不失败），再退缺省 `NEURAL_MAX_ADJUSTMENT` = 12
-（路径集含分歧链后 12 比 8 高 0.7 个点，真实回放带重排逐条一致）。重排参与门槛缺省 `NEURAL_MARGIN` = 9 nat
-（与不设限同分、重排开销约减半；5 会漏掉词库新补词的翻案差 0.7 个点）。
 
 ## crates/qingjian-lm
 

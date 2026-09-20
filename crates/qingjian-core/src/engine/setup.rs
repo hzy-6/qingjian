@@ -148,7 +148,7 @@ impl Engine {
         self.predictor = predictor;
     }
 
-    /// 挂上同步的整句重打分器（字级 Transformer，查询里当场打分，评测用）。`weight` 是神经分的权重 λ，
+    /// 挂上同步的整句重打分器（Qwen GGUF，查询里当场打分，评测用）。`weight` 是神经分的权重 λ，
     /// `margin` 是参与重排的路径分门槛（nat），`context` 是给模型看的前文字符数；
     /// `None` 用缺省 [`NEURAL_WEIGHT`] / [`NEURAL_MARGIN`] / [`RESCORE_CONTEXT_CHARS`]。
     /// 神经修正上限另由 [`Self::set_neural_max_adjustment`] 配置，缺省跟随模型文件的建议。

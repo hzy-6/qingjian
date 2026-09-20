@@ -69,9 +69,12 @@ pub fn qwen_path() -> Option<PathBuf> {
         });
         ggufs.into_iter().next()
     }
-    first_gguf(&user_data_dir()?.join("model")).or_else(|| {
-        resources_dir()
-            .ok()
-            .and_then(|dir| first_gguf(&dir.join("model")))
-    })
+    // 用户目录建不了/读不了(HOME 缺失、磁盘满、iCloud 只读)不该连包内模型都放弃
+    user_data_dir()
+        .and_then(|dir| first_gguf(&dir.join("model")))
+        .or_else(|| {
+            resources_dir()
+                .ok()
+                .and_then(|dir| first_gguf(&dir.join("model")))
+        })
 }

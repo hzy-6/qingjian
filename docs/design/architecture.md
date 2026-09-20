@@ -64,7 +64,7 @@ qingjian-core
 ├── shortcut        # 快捷候选：日期 / 时间 / 星期、v 表达式模式（四则运算、中文数字），不查词库
 ├── english         # 英文模式候选：词表精确词 / 前缀补全 / 一处编辑纠正（edit.rs），大小写跟着敲的走
 ├── sentence        # 离线整句转换：词图 + bigram Viterbi + 束搜索，LanguageModel trait（qingjian-lm 实现，缺省退化为一元），UserNgram 个人 n-gram（二元 + 三元），Context 上文（前两个词），
-│               #   SentenceScorer trait（qingjian-neural 实现）：convert_paths 出前 K 条路径，Engine（engine/rescoring）按 路径分 + λ·(神经分 − 静态分) 重排，异步时后台线程打分、壳停顿后取
+│               #   SentenceScorer trait（qingjian-qwen 实现）：convert_paths 出前 K 条路径，Engine（engine/rescoring）按 路径分 + λ·(神经分 − 静态分) 重排，异步时后台线程打分、壳停顿后取
 ├── emoji           # emoji 候选：EmojiTable（词 → emoji，Unicode CLDR 中文 annotations）
 ├── fuzzy           # 模糊音：FuzzyRules（配置 [fuzzy]）把每个音节扩展成多种写法，Expanded 借出给词库多写法查询
 ├── shuangpin       # 双拼：Scheme 四套方案的键位表，decode 把敲的键解成全拼（音节间带 '），Decoded 把上屏消耗换算回键数；切分之后全部复用全拼
@@ -130,7 +130,7 @@ qingjian-dictionary        （纯数据加载与查询，不依赖任何兄弟 c
         ▲
 qingjian-core              （定义 Translator / Learner / Predictor trait，依赖 dictionary）
         ▲           ▲            ▲
-qingjian-translate  qingjian-learning  qingjian-predict  qingjian-lm  qingjian-neural   （实现 core 的 trait，依赖 core；learning 另依赖 translate 的 LevelTable 做词汇按级汇总）
+qingjian-translate  qingjian-learning  qingjian-predict  qingjian-lm  qingjian-qwen   （实现 core 的 trait，依赖 core；learning 另依赖 translate 的 LevelTable 做词汇按级汇总）
         ▲           ▲            ▲
 qingjian-platform          （配置文件 Config：general / shortcut / fuzzy / predict 分节，toml_edit 原地改键保留注释；依赖 core、predict）
         ▲
@@ -182,10 +182,7 @@ CSR 偏移与后继）原样落盘，打开时 mmap 整个文件、校验一遍�
 - 文件 = 32 字节头（魔数 `QINGJIAN`、格式版本、数据种类 `Kind`、分节数）+ 分节表（4 字节标签 + 偏移 + 长度，正文 8 字节对齐）
   + 各分节。第一节固定是 `META`：TOML 的 `Metadata`（名称、许可证 SPDX、署名、来源、版本、条数、生成者），
   偏好设置里的词库列表直接显示它，第三方词库各带各的许可证靠的就是这一节。
-- 数据种类：词库、语言模型、释义表、emoji 表、英文词表，以及本地整句模型 `Kind::Model`——扩展名换成 `.qjm`，
   三节 `CONF` / `VOCB` / `SAFT` 原样装训练仓库导出的 `config.json` / `vocab.json` / `model.safetensors`（safetensors 是不透明载荷，
-  mmap 后切片给 candle，张量搬上设备后容器即丢；`META.entries` 记参数量）。`qingjian-neural::find_model(dir)` 先找 `.qjm`、没有再认三件套目录，
-  所以开发直接加载训练直出的目录，随包与用户目录只有一个文件；`dict-convert pack model`（`tools/release/pack-model.sh` 带元数据调它）打包。
 - 数值小端、原生对齐，crate 在大端机器上拒绝编译。字符串分节打开时校验一次 UTF-8，之后 `Text::deref` 走 unchecked
   （曾经每次 deref 都重新校验 30 MB，CLI 直接卡死）。定长结构体用 `zerocopy` 派生，`#[repr(C)]` 且手工排字段消灭填充
   （`KeyIndex` 16 字节、`Slot` 12 字节、`WordEntry` 12 字节、`Successor` 8 字节）。

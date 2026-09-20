@@ -24,6 +24,13 @@ done
 
 PRODUCT_FILES=(dict.qj lm.qj glossary-en.qj glossary-ja.qj glossary-zh.qj glossary-es.qj english.tsv english-frequency.tsv)
 LLM_FILES=(gloss-llm.jsonl gloss-en-llm.jsonl pinyin-llm.jsonl)
+# 随包整句模型:挑裁剪过的 *-text.gguf(与 bundle.sh 同规则);没有就发失败——CI 发的包必须带模型
+MODEL_GGUF=""
+for g in data/model/*-text.gguf data/model/*.gguf; do
+  [[ -f "$g" ]] || continue
+  MODEL_GGUF="$g"; break
+done
+[[ -n "$MODEL_GGUF" ]] || { echo "缺少 data/model/*.gguf(整句模型,裁剪版优先),CI 发的包必须带模型" >&2; exit 1; }
 
 for f in "${PRODUCT_FILES[@]}"; do
   [[ -f "data/generated/$f" ]] || { echo "缺少 data/generated/$f，先按 assets/lexicon/QINGJIAN.md 生成" >&2; exit 1; }
@@ -37,8 +44,9 @@ tar -czf "$OUT/qingjian-data.tar.gz" -C data/generated "${PRODUCT_FILES[@]}" "${
 present=()
 for f in "${LLM_FILES[@]}"; do [[ -f "data/generated/$f" ]] && present+=("$f"); done
 [[ ${#present[@]} -gt 0 ]] && tar -czf "$OUT/qingjian-llm-intermediates.tar.gz" -C data/generated "${present[@]}"
-(cd "$OUT" && shasum -a 256 ./*.tar.gz | tee SHA256SUMS)
-du -h "$OUT"/*.tar.gz
+cp "$MODEL_GGUF" "$OUT/"
+(cd "$OUT" && shasum -a 256 ./*.tar.gz ./*.gguf | tee SHA256SUMS)
+du -h "$OUT"/*.tar.gz "$OUT"/*.gguf
 
 [[ "$MODE" == "pack" ]] && exit 0
 
@@ -51,12 +59,13 @@ gh release view "$TAG" >/dev/null 2>&1 && { echo "$TAG 已存在，数据版本�
 
 sha_of() { grep " ./$1\$" "$OUT/SHA256SUMS" | cut -d' ' -f1; }
 gh release create "$TAG" --prerelease --target "$(git rev-parse HEAD)" --title "产品数据 $TAG" \
-  --notes "词库 / 语言模型 / 释义表（qingjian-data.tar.gz）、LLM 续跑中间产物（qingjian-llm-intermediates.tar.gz）。不可变；仓库 tools/release/data.lock 钉住要用哪一版。" \
-  "$OUT"/*.tar.gz "$OUT/SHA256SUMS"
+  --notes "词库 / 语言模型 / 释义表（qingjian-data.tar.gz）、整句模型 GGUF、LLM 续跑中间产物（qingjian-llm-intermediates.tar.gz）。不可变；仓库 tools/release/data.lock 钉住要用哪一版。" \
+  "$OUT"/*.tar.gz "$OUT"/*.gguf "$OUT/SHA256SUMS"
 
 cat > "$LOCK" <<EOF
 # 产品数据版本，data-bundle.sh 写、data-fetch.sh 读；不要手改
 tag = $TAG
 qingjian-data.tar.gz = $(sha_of qingjian-data.tar.gz)
+$(basename "$MODEL_GGUF") = $(sha_of "$(basename "$MODEL_GGUF")")
 EOF
 echo "已发 $TAG，锁文件已更新（记得提交）"

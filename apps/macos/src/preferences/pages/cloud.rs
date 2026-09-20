@@ -72,7 +72,7 @@ impl CloudPage {
         note(
             layout,
             mtm,
-            "随包的小模型在本机给整句候选重新排序，全程离线；停键后几十毫秒生效。关掉只用词库统计。",
+            "随包的小模型在本机给整句候选重新排序，全程离线；停键后约一百毫秒生效。关掉只用词库统计。",
         );
         let cap_titles: Vec<String> = MODEL_CAP_TITLES.iter().map(|t| (*t).to_owned()).collect();
         let model_cap = row_popup(

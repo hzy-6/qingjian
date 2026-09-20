@@ -164,8 +164,6 @@ pub enum Command {
     },
 
     /// 把 TSV 打包成 `.qj` 容器（mmap 直接用，启动近零耗时）：`dict` 读 dict.tsv 写 dict.qj，`lm` 读 lm-unigram/bigram.tsv 写 lm.qj，
-    /// `glossary --language en` 读 glossary-en.tsv 写 glossary-en.qj；`model` 把训练仓库导出的三件套目录（缺省 data/model）
-    /// 打成一个 model.qjm（`--out-dir data/model` 就写回原目录，随包只带这一个文件）
     Pack {
         /// 打包哪种数据
         kind: PackKind,

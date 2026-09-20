@@ -4,8 +4,7 @@
 
 - 换模型:随包神经模型从 102M 字级 Transformer(uer/gpt2-chinese-cluecorpussmall 转制,`model.qjm`)换成
   **Qwen3.5-0.8B-Q8_0 GGUF**(774 MB,Apache-2.0,与 GPL-3.0 兼容),放 `data/model/`,`bundle.sh` 打进 `Resources/model/`。
-  随包只带 GGUF;`.qjm` 不再随包(旧模型放进 `~/Library/Application Support/Qingjian/model/` 仍可用——壳的装配
-  `apps/macos` 的 `host/model` 在 GGUF 缺席时退 `.qjm`,代码路径与 `qingjian-neural` crate 保留,是以后评新模型的对照基线)。
+  随包只带 GGUF。(0.8B 时代的 `.qjm` 兜底与 `qingjian-neural` crate 已于 a023f2a 移除——2B 终局定稿后不再需要对照基线。)
 - 新 crate `qingjian-qwen`:llama.cpp 的 Rust 绑定(`llama-cpp-2` 0.1.156,feature `runtime` 门控,默认空壳、CI 不拉 C++ 依赖),
   `QwenScorer` 实现 `SentenceScorer`,给「前文 + 整句」按 BPE token 累加 log 概率,Metal 加速,双向上下文(`score_with_after`)。
 - Engine 三个新缺省:`NEURAL_GATE` = 2(个人证据保护闸,见下)、`RESCORE_CONTEXT_CHARS` = 128(原 64)、

@@ -20,7 +20,7 @@ qingjian-platform.workspace = true
 qingjian-predict.workspace = true
 qingjian-render.workspace = true
 qingjian-lm.workspace = true
-# Qwen GGUF 重打分（llama.cpp，Metal 加速）：壳的模型装配首选 GGUF，没有再退 .qjm
+# Qwen GGUF 重打分（llama.cpp，Metal 加速）：唯一的本地整句模型
 qingjian-qwen = { workspace = true, features = ["runtime"] }
 qingjian-translate.workspace = true
 thiserror.workspace = true

@@ -1,4 +1,4 @@
-//! 神经重打分：整句转换的前几条路径交给字级模型（[`SentenceScorer`]）再排一次。
+//! 神经重打分：整句转换的前几条路径交给本地模型（[`SentenceScorer`]）再排一次。
 //!
 //! 打分有两种接法：同步的（[`Engine::with_sentence_scorer`]，查询里当场打，CLI 评测用）和异步的
 //! （[`Engine::with_async_sentence_scorer`]，后台线程；壳里用）。两种都经过一张「前文 + 文本 → 神经分」的缓存
