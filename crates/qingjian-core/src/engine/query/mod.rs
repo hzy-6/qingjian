@@ -238,8 +238,8 @@ impl Engine {
             let canonical: String = hit.syllables().collect::<Vec<_>>().concat();
             let choice = letters
                 .get(..covered)
-                .map_or(0, |input| self.learner.choice_balance(input, hit.text))
-                .max(self.learner.choice_balance(&canonical, hit.text));
+                .map_or(0, |input| self.scoped_choice_balance(input, hit.text))
+                .max(self.scoped_choice_balance(&canonical, hit.text));
             let log_prob = sentence::transition_log_prob(
                 &*self.language_model,
                 self.personal(),

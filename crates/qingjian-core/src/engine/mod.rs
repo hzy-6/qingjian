@@ -5,6 +5,7 @@
 
 mod alignment;
 mod annotation;
+mod application_choices;
 mod commit;
 mod composing;
 mod correcting;

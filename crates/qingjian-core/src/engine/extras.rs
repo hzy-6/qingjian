@@ -78,9 +78,8 @@ impl Engine {
             .filter(|c| c.kind == CandidateKind::Chinese)
             .map_or(0, |c| {
                 let canonical: String = c.syllables.concat();
-                self.learner
-                    .choice_balance(text, &c.text)
-                    .max(self.learner.choice_balance(&canonical, &c.text))
+                self.scoped_choice_balance(text, &c.text)
+                    .max(self.scoped_choice_balance(&canonical, &c.text))
             });
         let english_weight = word.map_or(0, |w| self.learner.weight(w));
         let english_first =

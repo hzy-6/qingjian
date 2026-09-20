@@ -299,6 +299,7 @@ impl Engine {
             input,
             chosen: None,
             canonical: String::new(),
+            application: self.application.clone(),
             transitions: std::mem::take(&mut self.recording),
             typos: Vec::new(),
             erased: 0,

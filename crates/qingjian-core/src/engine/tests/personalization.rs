@@ -154,6 +154,41 @@ fn choices_generalize_across_the_candidate_full_pinyin() {
     assert_eq!(texts_of(&engine)[0], "开发");
 }
 
+/// 同一拼音在不同应用里可以形成相反偏好；全局选择仍保留，因此新应用也能继承总体习惯。
+#[test]
+fn choices_are_personalized_per_application() {
+    let mut engine = engine().with_learner(Box::new(CountingLearner(HashMap::new())));
+    let pick = |engine: &mut Engine, application: &str, text: &str| {
+        engine.set_application(Some(application.to_owned()));
+        engine.set_input("kaif");
+        let candidate = engine
+            .query()
+            .unwrap()
+            .candidates
+            .items
+            .into_iter()
+            .find(|candidate| candidate.text == text)
+            .unwrap();
+        engine.commit(&candidate);
+    };
+
+    for _ in 0..3 {
+        pick(&mut engine, "com.example.code", "开发");
+        pick(&mut engine, "com.example.chat", "开放");
+    }
+
+    engine.set_application(Some("com.example.code".to_owned()));
+    engine.set_input("kaif");
+    assert_eq!(texts_of(&engine)[0], "开发");
+
+    engine.set_application(Some("com.example.chat".to_owned()));
+    engine.set_input("kaif");
+    assert_eq!(texts_of(&engine)[0], "开放");
+
+    assert_eq!(engine.learner().choice_weight("kaif", "开发"), 3);
+    assert_eq!(engine.learner().choice_weight("kaif", "开放"), 3);
+}
+
 /// 负反馈:上屏后删掉换选别的词,被换掉的词在这个输入串下记负分——
 /// 净数(正减负)变低,再选时它不再稳居第一。
 #[test]

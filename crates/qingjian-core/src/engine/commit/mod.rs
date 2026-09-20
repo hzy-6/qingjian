@@ -111,11 +111,11 @@ impl Engine {
             CandidateKind::Chinese => {
                 self.learner.record(candidate);
                 let (consumed, input) = self.consumed_by(candidate);
-                self.learner.record_choice(&input, &candidate.text);
+                self.record_scoped_choice(&input, &candidate.text);
                 // 选择同时按候选全拼记一份:wod 下选的 我的,之后 wode 也能直接受益(反之亦然)
                 let canonical: String = candidate.syllables.concat();
                 if canonical != input {
-                    self.learner.record_choice(&canonical, &candidate.text);
+                    self.record_scoped_choice(&canonical, &candidate.text);
                 }
                 typos = self.accepted_typos(candidate);
                 (consumed, input)
@@ -141,10 +141,10 @@ impl Engine {
                 }
                 self.learner.record(candidate);
                 let (consumed, input) = self.whole_scope();
-                self.learner.record_choice(&input, &candidate.text);
+                self.record_scoped_choice(&input, &candidate.text);
                 let canonical: String = candidate.syllables.concat();
                 if canonical != input {
-                    self.learner.record_choice(&canonical, &candidate.text);
+                    self.record_scoped_choice(&canonical, &candidate.text);
                 }
                 (consumed, input)
             }
@@ -260,6 +260,7 @@ impl Engine {
                 )
                 .then(|| candidate.text.clone()),
                 canonical: candidate.syllables.concat(),
+                application: self.application.clone(),
                 transitions: std::mem::take(&mut self.recording),
                 typos,
                 erased: 0,
@@ -290,7 +291,7 @@ impl Engine {
         if key.is_empty() || chars > AUTO_WORD_MAX_CHARS || chars != syllables.len() {
             return None;
         }
-        self.learner.record_choice(&key, &text);
+        self.record_scoped_choice(&key, &text);
         let candidate = Candidate {
             text,
             kind: CandidateKind::Chinese,
@@ -345,15 +346,15 @@ impl Engine {
         });
         if let Some(chosen) = &last.chosen {
             self.learner.unrecord(chosen);
-            self.learner.unrecord_choice(&last.input, chosen);
+            self.unrecord_scoped_choice(last.application.as_deref(), &last.input, chosen);
             if !last.canonical.is_empty() && last.canonical != last.input {
-                self.learner.unrecord_choice(&last.canonical, chosen);
+                self.unrecord_scoped_choice(last.application.as_deref(), &last.canonical, chosen);
             }
             // 负反馈:除了退回那一次正分,A 在这个输入串下还要记一笔负分——
             // 换选是明确的「不要它」,让它排到从没选过它的词之后(双键同样各记一份)
-            self.learner.record_negative(&last.input, chosen);
+            self.record_scoped_negative(last.application.as_deref(), &last.input, chosen);
             if !last.canonical.is_empty() && last.canonical != last.input {
-                self.learner.record_negative(&last.canonical, chosen);
+                self.record_scoped_negative(last.application.as_deref(), &last.canonical, chosen);
             }
         }
         for transition in &last.transitions {
@@ -367,7 +368,7 @@ impl Engine {
             self.learner.unrecord_typo(typed, intended);
         }
         if let Some((key, phrase)) = &last.phrase {
-            self.learner.unrecord_choice(key, phrase);
+            self.unrecord_scoped_choice(last.application.as_deref(), key, phrase);
         }
     }
 

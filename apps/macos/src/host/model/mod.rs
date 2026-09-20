@@ -35,9 +35,20 @@ impl Host {
                 let model = qingjian_qwen::QwenScorer::load(&path)
                     .map(|scorer| Box::new(scorer) as Box<dyn SentenceScorer>)
                     .map_err(|error| error.to_string());
-                // 预热一次：真出问题（加载成功但打不了分）也在后台发现，别等用户第一键
-                let model = model.and_then(|scorer| match scorer.score("", &["的"]) {
-                    scores if !scores.is_empty() => Ok(scorer),
+                // 按生产批量与常见长度预热：Metal 会按张量形状懒编译；单字单路径不足以覆盖真正的
+                // 八路径长句，首次长句仍可能卡几秒。整个过程都在加载线程里，不阻塞按键。
+                let warmup = [
+                    "今天下午开会",
+                    "今天下午开会吗",
+                    "今天下午可以开会",
+                    "今天下午我们开会",
+                    "今天下午开始开会",
+                    "今天下午开个会议",
+                    "今天下午开会讨论",
+                    "今天下午再开会吧",
+                ];
+                let model = model.and_then(|scorer| match scorer.score("前文", &warmup) {
+                    scores if scores.len() == warmup.len() => Ok(scorer),
                     _ => Err("预热打分没有返回结果".to_owned()),
                 });
                 if model.is_ok() {

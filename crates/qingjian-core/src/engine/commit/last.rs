@@ -19,6 +19,9 @@ pub struct LastCommit {
     /// 上屏词的规范全拼（音节连写）:选择同时按它记了一份（`wod` 与 `wode` 互通）,撤销时对称退回。
     pub canonical: String,
 
+    /// 上屏发生时的应用；撤销必须退回同一应用的局部选择，不能使用重打时所在的新应用。
+    pub application: Option<String>,
+
     /// 记过的词转移（含上文与份数）。
     pub transitions: Vec<Transition>,
 
@@ -44,6 +47,7 @@ impl LastCommit {
             input: String::new(),
             chosen: None,
             canonical: String::new(),
+            application: None,
             transitions: Vec::new(),
             typos: Vec::new(),
             erased: 0,
