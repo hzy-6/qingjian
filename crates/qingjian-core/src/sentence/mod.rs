@@ -77,6 +77,10 @@ pub const ABBREVIATED_SPAN_CANDIDATES: usize = 20;
 /// 回放整句不变,102M 同样受益(结构公平)。12 与 10 同分,「分析师」类的终点仍不在 12 内(另有原因)。
 pub const BEAM_WIDTH: usize = 10;
 
+/// 整句前二静态分差低于这个数(nat)视为「静态拿不准」:重打分路径池翻倍扩到 `neural_paths` 上限。
+/// 分差悬殊的简单句维持小池,延迟预算不破;格子缓存命中时扩池只是多一次截断。
+pub const UNCERTAIN_STATIC_GAP: f64 = 2.0;
+
 /// 语言模型不认识、只能按词库词频兜底的词扣多少分：模型见过的词更可信。
 pub const FALLBACK_PENALTY: f64 = -4.0;
 
