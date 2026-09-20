@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 按 tools/release/data.lock 下载产品数据并校验：qingjian-data.tar.gz 解到 data/generated/，model.qjm 放到 data/model/。
+# 按 tools/release/data.lock 下载产品数据并校验：qingjian-data.tar.gz 解到 data/generated/。
 #
 #   tools/release/data-fetch.sh            # 下载 + 校验 + 解开
 #   tools/release/data-fetch.sh --verify   # 只校验 target/release-data/ 里已下载的文件
@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOCK="$ROOT/tools/release/data.lock"
 OUT="$ROOT/target/release-data"
 REPO="qingjian-team/qingjian"
-ASSETS=(qingjian-data.tar.gz model.qjm)
+ASSETS=(qingjian-data.tar.gz)
 cd "$ROOT"
 
 [[ -f "$LOCK" ]] || { echo "缺少 $LOCK" >&2; exit 1; }
@@ -41,7 +41,6 @@ done
 
 mkdir -p data/generated data/model
 tar -xzf "$OUT/qingjian-data.tar.gz" -C data/generated
-cp "$OUT/model.qjm" data/model/model.qjm
 # 解出来的 mtime 比 checkout 出来的 TSV 旧，bundle.sh 会以为要重打
 find data/generated data/model -type f -exec touch {} +
 echo "产品数据 $TAG 已就位"
@@ -50,6 +49,5 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   {
     echo "DATA_TAG=$TAG"
     echo "DATA_SHA256=$(lock_value qingjian-data.tar.gz)"
-    echo "MODEL_SHA256=$(lock_value model.qjm)"
   } >> "$GITHUB_ENV"
 fi

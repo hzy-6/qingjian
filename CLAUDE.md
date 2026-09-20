@@ -17,8 +17,7 @@ macOS 输入法，Core 不依赖平台 API。已发版 macOS 0.1.2（自用 + �
 - `crates/qingjian-learning`：用户侧落盘：词频 / 用户词 / 个人 n-gram / 敲错表（`FrequencyLearner`）、输入日志（`InputLog`）、输入统计（`UsageStats`）、词汇记录（`VocabularyBook`）。
 - `crates/qingjian-predict`：云联想 `CloudPredictor`（OpenAI 兼容接口）与释义兜底 `CloudGlossFiller`；`PredictConfig` 是 `[predict]` 分节。
 - `crates/qingjian-lm`：整句转换的 bigram 语言模型 `BigramModel`。
-- `crates/qingjian-neural`：字级 Transformer 本地推理 `CharScorer`（candle），给整句前几条路径重打分。
-- `crates/qingjian-qwen`：Qwen3.5-0.8B GGUF 本地推理 `QwenScorer`（llama.cpp，`runtime` feature），随包首选的重打分模型，见 `docs/notes/qwen-rescoring.md`。
+- `crates/qingjian-qwen`：Qwen3.5-2B GGUF 本地推理 `QwenScorer`（llama.cpp，`runtime` feature），唯一的重打分模型，见 `docs/notes/qwen-rescoring.md`。
 - `crates/qingjian-format`：`.qj` 数据容器（mmap 读、零拷贝视图、写入器、哈希索引）。
 - `crates/qingjian-platform`：配置与词库装配：`Config`（TOML 配置）、`extra_dictionaries`。
 - `crates/qingjian-render`：自绘渲染器：候选窗一帧 + 主题 → 位图。见 `docs/design/rendering.md`。

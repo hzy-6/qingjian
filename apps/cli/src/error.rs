@@ -1,7 +1,6 @@
 use qingjian_dictionary::DictionaryError;
 use qingjian_learning::LearningError;
 use qingjian_lm::LmError;
-use qingjian_neural::NeuralError;
 use qingjian_platform::ConfigError;
 use qingjian_predict::PredictError;
 use qingjian_translate::GlossaryError;
@@ -9,9 +8,6 @@ use qingjian_translate::GlossaryError;
 pub enum CliError {
     #[error(transparent)]
     Dictionary(#[from] DictionaryError),
-
-    #[error(transparent)]
-    Neural(#[from] NeuralError),
 
     #[error(transparent)]
     Glossary(#[from] GlossaryError),

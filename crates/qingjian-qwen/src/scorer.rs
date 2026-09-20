@@ -159,7 +159,7 @@ impl SentenceScorer for QwenScorer {
         Some(30.0)
     }
 
-    /// 双向上下文补分（与 `qingjian-neural::CharScorer::score_with_after` 同一配方）：
+    /// 双向上下文补分（正向分为主、右文增量按 0.25 折入的配方）：
     /// 正向分为主，右文项比较「候选 + 右文」与「右文」在同一前文下的增量，按 0.25 折进总分。
     /// 后文为空走快速路径，不多做推理；右文项打不出（模型出错）就只给正向分。
     fn score_with_after(&self, before: &str, after: &str, texts: &[&str]) -> Vec<f64> {

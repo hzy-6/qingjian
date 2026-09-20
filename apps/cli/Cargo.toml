@@ -25,7 +25,6 @@ qingjian-platform.workspace = true
 qingjian-predict.workspace = true
 qingjian-qwen = { workspace = true, optional = true }
 qingjian-lm.workspace = true
-qingjian-neural.workspace = true
 qingjian-translate.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

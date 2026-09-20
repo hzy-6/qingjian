@@ -76,29 +76,26 @@ fn run() -> Result<(), CliError> {
     Ok(())
 }
 
-/// 按参数挑整句重打分的第二打分来源：`--neural` 字级 Transformer（`.qjm`）、`--qwen` Qwen GGUF，都不给就没有。
-/// 两个参数 clap 已保证互斥。
+/// 按参数挑整句重打分的第二打分来源：`--qwen` 指定 Qwen GGUF，不给就没有。
 fn neural_scorer(
     args: &Args,
 ) -> Result<Option<Box<dyn qingjian_core::sentence::SentenceScorer>>, CliError> {
-    if let Some(path) = &args.qwen {
-        #[cfg(feature = "qwen")]
-        {
-            let scorer =
-                qingjian_qwen::QwenScorer::load(path).map_err(|e| CliError::Qwen(e.to_string()))?;
-            return Ok(Some(Box::new(scorer)));
-        }
-        #[cfg(not(feature = "qwen"))]
-        {
-            return Err(CliError::Qwen(format!(
-                "--qwen 需要用 `--features qwen` 编译（cargo run -p qingjian-cli --features qwen）：{}",
-                path.display()
-            )));
-        }
+    let Some(path) = &args.qwen else {
+        return Ok(None);
+    };
+    #[cfg(feature = "qwen")]
+    {
+        let scorer =
+            qingjian_qwen::QwenScorer::load(path).map_err(|e| CliError::Qwen(e.to_string()))?;
+        Ok(Some(Box::new(scorer)))
     }
-    match &args.neural {
-        Some(dir) => Ok(Some(Box::new(qingjian_neural::CharScorer::load(dir)?))),
-        None => Ok(None),
+    #[cfg(not(feature = "qwen"))]
+    {
+        let _ = path;
+        Err(CliError::Qwen(
+            "--qwen 需要用 `--features qwen` 编译（cargo run -p qingjian-cli --features qwen）"
+                .to_owned(),
+        ))
     }
 }
 

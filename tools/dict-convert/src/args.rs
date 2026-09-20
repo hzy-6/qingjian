@@ -211,7 +211,4 @@ pub enum PackKind {
 
     /// 释义表（glossary-<语言>.tsv → glossary-<语言>.qj）
     Glossary,
-
-    /// 本地整句模型（三件套目录 → model.qjm）
-    Model,
 }

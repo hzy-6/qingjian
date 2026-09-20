@@ -91,9 +91,7 @@ if [[ -f data/generated/dict.tsv || -f data/generated/dict.qj ]]; then
     cp data/generated/dicts/*.qj "$APP/Contents/Resources/dicts/"
   fi
   [[ -f data/generated/lm.qj ]] && cp data/generated/lm.qj "$APP/Contents/Resources/"
-  # 本地整句模型：Qwen GGUF（llama.cpp 推理），放 data/model/ 里；随包只带这一个文件。
-  # 不再随包 .qjm 字级模型（Qwen 全面占优，见 docs/notes/qwen-rescoring.md）——想用旧模型把它放进
-  # ~/Library/Application Support/Qingjian/model/ 即可（壳的装配 GGUF 缺席时退 .qjm）；开发打包用 tools/release/pack-model.sh
+  # 本地整句模型：Qwen GGUF（llama.cpp 推理），放 data/model/ 里；随包只带这一个文件
   model_dir="${QINGJIAN_MODEL_DIR:-data/model}"
   # GGUF 优先挑裁剪过词表的纯文本版(*-text.gguf,小 100MB,盲评逐句一致),没有再按文件名取最小一份
   # (装配与 paths::qwen_path 同规则);几百 MB,随包体积的主要来源

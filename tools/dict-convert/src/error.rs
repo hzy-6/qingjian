@@ -17,9 +17,6 @@ pub enum ConvertError {
     #[error(transparent)]
     Glossary(#[from] qingjian_translate::GlossaryError),
 
-    #[error(transparent)]
-    Neural(#[from] qingjian_neural::NeuralError),
-
     /// 文件不是预期格式。
     #[error("{path}:{line}: {reason}")]
     Format {

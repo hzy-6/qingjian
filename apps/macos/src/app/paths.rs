@@ -49,18 +49,8 @@ pub fn dicts_dir() -> Option<PathBuf> {
     Some(dir)
 }
 
-/// 本地整句模型（`.qjm` 单文件，或开发时的三件套目录）：
-/// 用户目录 `model/` 里有就用它（自己训的），否则用包里的 `Resources/model/`；都没有是 `None`。
-pub fn model_path() -> Option<PathBuf> {
-    let user = user_data_dir()?.join("model");
-    if let Some(found) = qingjian_neural::find_model(&user) {
-        return Some(found);
-    }
-    qingjian_neural::find_model(&resources_dir().ok()?.join("model"))
-}
-
-/// Qwen GGUF（llama.cpp）：查找规则同 [`model_path`]，目录里有几份按文件名取最小的一份
-/// （`read_dir` 不保证顺序，显式取 min 与 bundle.sh 的字典序一致）。有 GGUF 就用它重排（首选），没有再退回 `.qjm` 字级模型。
+/// Qwen GGUF（llama.cpp）：用户目录与包内 `model/` 目录里有几份按文件名取最小的一份
+/// （`read_dir` 不保证顺序，显式取 min 与 bundle.sh 的字典序一致）。
 pub fn qwen_path() -> Option<PathBuf> {
     fn first_gguf(dir: &Path) -> Option<PathBuf> {
         std::fs::read_dir(dir)

@@ -122,7 +122,7 @@ pub struct Engine {
     /// 整句转换的语言模型，缺省为 [`NoLanguageModel`]（退化成一元词频）。
     language_model: Box<dyn LanguageModel>,
 
-    /// 整句路径的同步神经重打分器（字级 Transformer，查询里当场打分；CLI 评测用）。
+    /// 整句路径的同步神经重打分器（Qwen GGUF，查询里当场打分；CLI 评测用）。
     sentence_scorer: Option<Box<dyn SentenceScorer>>,
 
     /// 异步重打分：后台线程里的打分器，壳在停顿后送任务、轮询结果（见 [`rescoring`]）。
@@ -155,7 +155,7 @@ pub struct Engine {
     /// 神经重打分看 Viterbi 的前几条路径（缺省 [`RESCORE_PATHS`]），见 [`Self::set_neural_paths`]。
     neural_paths: usize,
 
-    /// 模型文件建议的单条路径最大神经修正（nat），接打分器时从 [`SentenceScorer::max_adjustment`] 读一次；旧模型 `None`。
+    /// 模型建议的单条路径最大神经修正（nat），接打分器时从 [`SentenceScorer::max_adjustment`] 读一次；没给是 `None`。
     model_max_adjustment: Option<f64>,
 
     /// 已发出的最大重打分请求序号：[`Self::poll_rescoring`] 只收不小于它的结果，旧请求的迟到结果（上下文字符串恰好相同也一样）丢掉。
@@ -337,7 +337,7 @@ const SENTENCE_ARBITRATION_MARGIN: f64 = 2.5;
 
 /// 神经重打分的缺省权重 λ（见 `Engine::neural_weight`）。0.75：随包 Qwen3.5-2B 在 895 句混域主尺上扫出
 /// （0.5 时 61.5/91.0 → 0.75 时 61.8/91.2，139 尺 92.1 → 94.2），回放零回归（见 docs/notes/qwen-rescoring.md 第五轮）。
-/// 更早的 0.8B / 102M 模型用 0.5 更好，切回它们时建议 CLI 覆盖 `--neural-weight 0.5`。
+/// （历史上的 0.8B / 102M 模型用 0.5 更好。）
 pub const NEURAL_WEIGHT: f64 = 0.75;
 
 /// 单条路径允许的最大神经修正（nat），避免模型异常分数一次性压过词频和个人学习。

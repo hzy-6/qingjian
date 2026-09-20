@@ -16,9 +16,6 @@ pub enum Kind {
 
     /// 英文词表。
     WordList = 5,
-
-    /// 本地整句模型（`qingjian-neural::CharScorer`，扩展名 `.qjm`）。
-    Model = 6,
 }
 
 impl Kind {
@@ -29,7 +26,7 @@ impl Kind {
             3 => Self::Glossary,
             4 => Self::Emoji,
             5 => Self::WordList,
-            6 => Self::Model,
+            // 6 曾是本地整句模型 .qjm:随包模型已换 GGUF,旧文件按「不认识的数据种类」处理
             _ => return None,
         })
     }

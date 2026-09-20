@@ -63,19 +63,6 @@ pub fn pack(
             glossary.write_qj(&out, &metadata)?;
             report(&out, glossary.len(), started);
         }
-        PackKind::Model => {
-            let input = inputs
-                .first()
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from("data/model"));
-            let out = out_dir.join("model.qjm");
-            let parameters = qingjian_neural::qjm::pack(&input, &out, &metadata)?;
-            report(
-                &out,
-                usize::try_from(parameters).unwrap_or(usize::MAX),
-                started,
-            );
-        }
     }
     Ok(())
 }

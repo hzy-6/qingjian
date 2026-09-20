@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把本机 data/generated/ 与 data/model/model.qjm 发成一版不可变的数据 Release（data-vN，预发布），并写 tools/release/data.lock。
+# 把本机 data/generated/ 发成一版不可变的数据 Release（data-vN，预发布），并写 tools/release/data.lock。
 # CI 与自编译按锁文件取数据（data-fetch.sh）；改了数据发新号，锁文件与用到新数据的代码同一个提交。
 #
 #   tools/release/data-bundle.sh                 # 发到下一个 data-vN
@@ -23,7 +23,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 PRODUCT_FILES=(dict.qj lm.qj glossary-en.qj glossary-ja.qj glossary-zh.qj glossary-es.qj english.tsv english-frequency.tsv)
-MODEL_FILE=data/model/model.qjm
 LLM_FILES=(gloss-llm.jsonl gloss-en-llm.jsonl pinyin-llm.jsonl)
 
 for f in "${PRODUCT_FILES[@]}"; do
@@ -32,18 +31,14 @@ done
 DOMAIN_FILES=()
 for f in data/generated/dicts/*.qj; do [[ -f "$f" ]] && DOMAIN_FILES+=("dicts/$(basename "$f")"); done
 [[ ${#DOMAIN_FILES[@]} -gt 0 ]] || { echo "缺少 data/generated/dicts/*.qj" >&2; exit 1; }
-[[ -f data/model/model.safetensors || -f "$MODEL_FILE" ]] || { echo "缺少 $MODEL_FILE（训练仓库导出三件套到 data/model/ 再跑 tools/release/pack-model.sh）" >&2; exit 1; }
-# 三件套比 .qjm 新就重打
-[[ -f data/model/model.safetensors ]] && tools/release/pack-model.sh
 
 rm -rf "$OUT" && mkdir -p "$OUT"
 tar -czf "$OUT/qingjian-data.tar.gz" -C data/generated "${PRODUCT_FILES[@]}" "${DOMAIN_FILES[@]}"
-cp "$MODEL_FILE" "$OUT/model.qjm"
 present=()
 for f in "${LLM_FILES[@]}"; do [[ -f "data/generated/$f" ]] && present+=("$f"); done
 [[ ${#present[@]} -gt 0 ]] && tar -czf "$OUT/qingjian-llm-intermediates.tar.gz" -C data/generated "${present[@]}"
-(cd "$OUT" && shasum -a 256 ./*.tar.gz ./model.qjm | tee SHA256SUMS)
-du -h "$OUT"/*.tar.gz "$OUT/model.qjm"
+(cd "$OUT" && shasum -a 256 ./*.tar.gz | tee SHA256SUMS)
+du -h "$OUT"/*.tar.gz
 
 [[ "$MODE" == "pack" ]] && exit 0
 
@@ -56,13 +51,12 @@ gh release view "$TAG" >/dev/null 2>&1 && { echo "$TAG 已存在，数据版本�
 
 sha_of() { grep " ./$1\$" "$OUT/SHA256SUMS" | cut -d' ' -f1; }
 gh release create "$TAG" --prerelease --target "$(git rev-parse HEAD)" --title "产品数据 $TAG" \
-  --notes "词库 / 语言模型 / 释义表（qingjian-data.tar.gz）、本地整句模型（model.qjm）、LLM 续跑中间产物（qingjian-llm-intermediates.tar.gz）。不可变；仓库 tools/release/data.lock 钉住要用哪一版。" \
-  "$OUT"/*.tar.gz "$OUT/model.qjm" "$OUT/SHA256SUMS"
+  --notes "词库 / 语言模型 / 释义表（qingjian-data.tar.gz）、LLM 续跑中间产物（qingjian-llm-intermediates.tar.gz）。不可变；仓库 tools/release/data.lock 钉住要用哪一版。" \
+  "$OUT"/*.tar.gz "$OUT/SHA256SUMS"
 
 cat > "$LOCK" <<EOF
 # 产品数据版本，data-bundle.sh 写、data-fetch.sh 读；不要手改
 tag = $TAG
 qingjian-data.tar.gz = $(sha_of qingjian-data.tar.gz)
-model.qjm = $(sha_of model.qjm)
 EOF
 echo "已发 $TAG，锁文件已更新（记得提交）"
