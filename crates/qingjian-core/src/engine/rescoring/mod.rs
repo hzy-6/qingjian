@@ -7,6 +7,7 @@
 //! 按键回调永远不等模型：先按词级模型出候选，模型的意见晚几十毫秒到。
 
 mod cache;
+mod context;
 mod probe;
 mod worker;
 
@@ -16,6 +17,7 @@ mod tests;
 use super::*;
 
 pub(crate) use cache::NeuralCache;
+pub use context::select_context;
 pub use probe::RerankProbe;
 pub(crate) use worker::RescoreWorker;
 
@@ -39,8 +41,11 @@ impl Engine {
             return String::new();
         }
         match &self.rescoring_before {
-            Some(before) => take_last_chars(before, self.neural_context),
-            None => self.history.recent(self.neural_context).to_owned(),
+            Some(before) => select_context(before, self.neural_context),
+            None => select_context(
+                self.history.recent(self.neural_context * 2),
+                self.neural_context,
+            ),
         }
     }
 
