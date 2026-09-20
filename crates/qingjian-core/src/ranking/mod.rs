@@ -44,7 +44,7 @@ pub fn weight_bonus(count: u32) -> f64 {
 pub fn rank(
     items: &mut Vec<Scored<'_>>,
     limit: usize,
-    context: impl Fn(&Scored<'_>) -> (u32, f64),
+    context: impl Fn(&Scored<'_>) -> (i32, f64),
 ) {
     // 远超上限时先按结构键 + 词频线性选出前面一段：同一个词会被多种切分命中，多选一倍留给去重（结果仍可能略少于上限，无妨）
     let preselect = limit.saturating_mul(2);
@@ -151,7 +151,7 @@ mod tests {
         // 同一输入串下选过的压过上下文
         rank(&mut items, usize::MAX, |s| {
             (
-                u32::from(s.hit.text == "把"),
+                i32::from(s.hit.text == "把"),
                 if s.hit.text == "吧" { -1.0 } else { -6.0 },
             )
         });

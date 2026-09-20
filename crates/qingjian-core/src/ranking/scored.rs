@@ -40,7 +40,7 @@ pub type SortKey<'a> = (
     Reverse<usize>,
     usize,
     Reverse<bool>,
-    Reverse<u32>,
+    Reverse<i32>,
     Reverse<i64>,
     bool,
     usize,
@@ -73,7 +73,7 @@ impl<'a> Scored<'a> {
     }
 
     /// `choice` 是同输入串下的选择次数，`score` 是上下文得分（log 概率，已含用户加分与模糊音 / 敲错扣分）。
-    pub(super) fn key(&self, choice: u32, score: f64) -> SortKey<'a> {
+    pub(super) fn key(&self, choice: i32, score: f64) -> SortKey<'a> {
         (
             Reverse(self.hit.exact),
             Reverse(self.coverage),

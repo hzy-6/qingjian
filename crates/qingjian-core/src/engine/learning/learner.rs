@@ -36,6 +36,16 @@ pub trait Learner: Send {
     /// 撤销一次 [`Self::record_choice`]。
     fn unrecord_choice(&mut self, _input: &str, _text: &str) {}
 
+    /// 负反馈:用户上屏 A 后删掉,同一段拼音换选了 B——A 在这个输入串下记一笔负分。
+    /// 与 [`Self::unrecord_choice`](把那次正分退回去)互补:负分让 A 排到从没选过它的词之后。
+    fn record_negative(&mut self, _input: &str, _text: &str) {}
+
+    /// `text` 在输入串 `input` 下的净选择数(正分减负分),没记录返回 0。
+    /// 词级排序的「用户选过」键用它:负反馈直接把词压下去。
+    fn choice_balance(&self, input: &str, text: &str) -> i32 {
+        self.choice_weight(input, text) as i32
+    }
+
     /// 撤销 `times` 份 [`Self::record_transition`]。
     fn unrecord_transition(&mut self, _context: Context<'_>, _word: &str, _times: u32) {}
 

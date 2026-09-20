@@ -74,6 +74,14 @@ impl Learner for MutedLearner {
         self.inner.choice_weight(input, text)
     }
 
+    fn record_negative(&mut self, input: &str, text: &str) {
+        self.inner.record_negative(input, text);
+    }
+
+    fn choice_balance(&self, input: &str, text: &str) -> i32 {
+        self.inner.choice_balance(input, text)
+    }
+
     fn record_raw(&mut self, input: &str) {
         if !self.muted() {
             self.inner.record_raw(input);

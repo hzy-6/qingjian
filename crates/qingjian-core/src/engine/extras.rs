@@ -79,11 +79,12 @@ impl Engine {
             .map_or(0, |c| {
                 let canonical: String = c.syllables.concat();
                 self.learner
-                    .choice_weight(text, &c.text)
-                    .max(self.learner.choice_weight(&canonical, &c.text))
+                    .choice_balance(text, &c.text)
+                    .max(self.learner.choice_balance(&canonical, &c.text))
             });
         let english_weight = word.map_or(0, |w| self.learner.weight(w));
-        let english_first = !self.chinese_first && unlikely_pinyin && chosen <= english_weight;
+        let english_first =
+            !self.chinese_first && unlikely_pinyin && chosen <= english_weight as i32;
         let mut position = if items.is_empty() || english_first {
             0
         } else {

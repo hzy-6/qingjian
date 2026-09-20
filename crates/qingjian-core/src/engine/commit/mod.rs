@@ -349,6 +349,12 @@ impl Engine {
             if !last.canonical.is_empty() && last.canonical != last.input {
                 self.learner.unrecord_choice(&last.canonical, chosen);
             }
+            // 负反馈:除了退回那一次正分,A 在这个输入串下还要记一笔负分——
+            // 换选是明确的「不要它」,让它排到从没选过它的词之后(双键同样各记一份)
+            self.learner.record_negative(&last.input, chosen);
+            if !last.canonical.is_empty() && last.canonical != last.input {
+                self.learner.record_negative(&last.canonical, chosen);
+            }
         }
         for transition in &last.transitions {
             self.learner.unrecord_transition(

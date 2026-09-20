@@ -38,6 +38,34 @@ impl Learner for FrequencyLearner {
             .unwrap_or(0)
     }
 
+    fn record_negative(&mut self, input: &str, text: &str) {
+        if input.is_empty() || text.is_empty() {
+            return;
+        }
+        *self
+            .negatives
+            .entry(input.to_owned())
+            .or_default()
+            .entry(text.to_owned())
+            .or_default() += 1;
+        self.negatives_dirty = true;
+        if self.negative_count() > MAX_CHOICE_ENTRIES {
+            self.decay_choices();
+        }
+        tracing::debug!(input, text, "记录输入串下的负反馈");
+    }
+
+    fn choice_balance(&self, input: &str, text: &str) -> i32 {
+        let positive = self.choice_weight(input, text) as i32;
+        let negative = self
+            .negatives
+            .get(input)
+            .and_then(|texts| texts.get(text))
+            .copied()
+            .unwrap_or(0) as i32;
+        positive - negative
+    }
+
     fn record_raw(&mut self, input: &str) {
         self.record_choice(input, RAW_MARK);
     }
@@ -259,6 +287,17 @@ impl Learner for FrequencyLearner {
                 }
                 Err(error) => {
                     tracing::warn!(path = %choices_path.display(), %error, "输入串选择保存失败")
+                }
+            }
+        }
+        if self.negatives_dirty {
+            let negatives_path = self.negatives_path(&path);
+            match self.save_negatives_to(&negatives_path) {
+                Ok(()) => {
+                    tracing::info!(path = %negatives_path.display(), entries = self.negative_count(), "负反馈已保存")
+                }
+                Err(error) => {
+                    tracing::warn!(path = %negatives_path.display(), %error, "负反馈保存失败")
                 }
             }
         }

@@ -69,6 +69,11 @@ impl FrequencyLearner {
         frequency_path.with_file_name(USER_CHOICES_FILE)
     }
 
+    /// 负反馈文件与词频文件同目录。
+    pub(super) fn negatives_path(&self, frequency_path: &Path) -> PathBuf {
+        frequency_path.with_file_name(USER_NEGATIVES_FILE)
+    }
+
     /// 从 `输入串\t词\t次数` 读按输入串记的选择，返回跳过的坏行数。
     pub(super) fn load_choices(&mut self, source: &str) -> usize {
         let mut skipped = 0;
@@ -85,6 +90,45 @@ impl FrequencyLearner {
             }
         }
         skipped
+    }
+
+    pub(super) fn load_negatives(&mut self, source: &str) -> usize {
+        let mut skipped = 0;
+        for line in data_lines(source) {
+            let Some((input, text, count)) = parse_counted_pair(line) else {
+                skipped += 1;
+                continue;
+            };
+            if count > 0 {
+                self.negatives
+                    .entry(input.to_owned())
+                    .or_default()
+                    .insert(text.to_owned(), count);
+            }
+        }
+        skipped
+    }
+
+    pub(super) fn save_negatives_to(&mut self, path: &Path) -> Result<(), LearningError> {
+        let mut rows: Vec<(&String, &String, &u32)> = self
+            .negatives
+            .iter()
+            .flat_map(|(input, texts)| texts.iter().map(move |(text, count)| (input, text, count)))
+            .collect();
+        rows.sort_by(|a, b| {
+            a.0.cmp(b.0)
+                .then_with(|| b.2.cmp(a.2))
+                .then_with(|| a.1.cmp(b.1))
+        });
+        write_atomic(path, |file| {
+            writeln!(file, "# 青简负反馈：输入串\t词\t被换选掉的次数")?;
+            for (input, text, count) in rows {
+                writeln!(file, "{input}\t{text}\t{count}")?;
+            }
+            Ok(())
+        })?;
+        self.negatives_dirty = false;
+        Ok(())
     }
 
     pub(super) fn save_choices_to(&mut self, path: &Path) -> Result<(), LearningError> {
@@ -168,7 +212,12 @@ impl FrequencyLearner {
         self.choices.values().map(HashMap::len).sum()
     }
 
-    /// 所有按输入串记的计数减半，去掉减到零的。
+    /// 负反馈表条数。
+    pub fn negative_count(&self) -> usize {
+        self.negatives.values().map(HashMap::len).sum()
+    }
+
+    /// 所有按输入串记的计数减半,去掉减到零的;负反馈表同步衰减(旧账别一直压着)。
     pub(super) fn decay_choices(&mut self) {
         for texts in self.choices.values_mut() {
             texts.retain(|_, count| {
@@ -177,6 +226,13 @@ impl FrequencyLearner {
             });
         }
         self.choices.retain(|_, texts| !texts.is_empty());
+        for texts in self.negatives.values_mut() {
+            texts.retain(|_, count| {
+                *count /= 2;
+                *count > 0
+            });
+        }
+        self.negatives.retain(|_, texts| !texts.is_empty());
     }
 
     /// 用户词文件与词频文件同目录。

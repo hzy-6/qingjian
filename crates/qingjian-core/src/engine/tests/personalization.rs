@@ -153,3 +153,38 @@ fn choices_generalize_across_the_candidate_full_pinyin() {
     engine.set_input("kaifa");
     assert_eq!(texts_of(&engine)[0], "开发");
 }
+
+/// 负反馈:上屏后删掉换选别的词,被换掉的词在这个输入串下记负分——
+/// 净数(正减负)变低,再选时它不再稳居第一。
+#[test]
+fn retracting_a_choice_demotes_the_replaced_word() {
+    let mut engine = engine().with_learner(Box::new(CountingLearner(HashMap::new())));
+    let pick = |engine: &mut Engine, input: &str, text: &str| {
+        engine.set_input(input);
+        let candidate = engine
+            .query()
+            .unwrap()
+            .candidates
+            .items
+            .into_iter()
+            .find(|c| c.text == text && c.kind == CandidateKind::Chinese)
+            .unwrap();
+        engine.commit(&candidate);
+    };
+    // kaif 下选 开发 两次,它升到第一
+    pick(&mut engine, "kaif", "开发");
+    pick(&mut engine, "kaif", "开发");
+    engine.set_input("kaif");
+    assert_eq!(texts_of(&engine)[0], "开发");
+    assert_eq!(engine.learner().choice_balance("kaif", "开发"), 2);
+    // 第三次选 开发 后删掉换 开放:开发 吃一笔负反馈(正分也退掉一份)
+    pick(&mut engine, "kaif", "开发");
+    engine.note_backspace();
+    engine.note_backspace();
+    pick(&mut engine, "kaif", "开放");
+    // 净数 = +2 正(两次保留) − 1 负 = 1;关键是有负记录
+    assert_eq!(engine.learner().choice_balance("kaif", "开发"), 1);
+    // 下次查询:开放(有正分无负分)排到 开发 前面
+    engine.set_input("kaif");
+    assert_eq!(texts_of(&engine)[0], "开放");
+}

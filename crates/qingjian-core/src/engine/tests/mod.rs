@@ -109,6 +109,16 @@ impl Learner for CountingLearner {
         }
     }
 
+    fn record_negative(&mut self, input: &str, text: &str) {
+        *self.0.entry(format!("neg\t{input}\t{text}")).or_default() += 1;
+    }
+
+    fn choice_balance(&self, input: &str, text: &str) -> i32 {
+        let positive = self.choice_weight(input, text) as i32;
+        let negative = *self.0.get(&format!("neg\t{input}\t{text}")).unwrap_or(&0) as i32;
+        positive - negative
+    }
+
     fn raw_count(&self, input: &str) -> u32 {
         self.0.get(&format!("{input}\t<raw>")).copied().unwrap_or(0)
     }

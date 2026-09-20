@@ -25,6 +25,7 @@ const USER_NGRAM_FILE: &str = "user-ngram.tsv";
 
 /// 按输入串记的选择文件名，与词频文件同目录：`输入串\t词\t次数`。
 const USER_CHOICES_FILE: &str = "user-choices.tsv";
+const USER_NEGATIVES_FILE: &str = "user-negatives.tsv";
 
 /// 个人英文词表文件名，与词频文件同目录：`词\t次数`（词按第一次敲的写法存）。
 const USER_ENGLISH_FILE: &str = "user-english.tsv";
@@ -65,11 +66,17 @@ pub struct FrequencyLearner {
     /// 个人 n-gram 自上次保存后是否有变化。
     ngram_dirty: bool,
 
+    /// 输入串 → (词 → 在这个输入串下被换选掉[上屏后删掉换了别的]的次数):负反馈,让被换掉的词往后排。
+    negatives: HashMap<String, HashMap<String, u32>>,
+
     /// 输入串 → (词 → 在这个输入串下被选的次数)。
     choices: HashMap<String, HashMap<String, u32>>,
 
     /// 按输入串记的选择自上次保存后是否有变化。
     choices_dirty: bool,
+
+    /// 负反馈表自上次保存后是否有变化。
+    negatives_dirty: bool,
 
     /// 个人英文词：小写编码 → (第一次敲的写法, 次数)。回车原样上屏的英文词、选过的英文候选。
     english: BTreeMap<String, (String, u32)>,
@@ -141,6 +148,11 @@ impl FrequencyLearner {
             let skipped = learner.load_choices(&source);
             note_skipped(&choices_path, skipped);
         }
+        let negatives_path = path.with_file_name(USER_NEGATIVES_FILE);
+        if let Some(source) = read_text_lossy(&negatives_path)? {
+            let skipped = learner.load_negatives(&source);
+            note_skipped(&negatives_path, skipped);
+        }
         let english_path = Self::english_path(&path);
         if let Some(source) = read_text_lossy(&english_path)? {
             let skipped = learner.load_english(&source);
@@ -188,6 +200,7 @@ impl FrequencyLearner {
             || self.english_dirty
             || self.ngram_dirty
             || self.choices_dirty
+            || self.negatives_dirty
             || self.typos_dirty
     }
 }
