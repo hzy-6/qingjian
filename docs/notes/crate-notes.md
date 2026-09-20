@@ -80,7 +80,8 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 Qwen3.5 是注意力 + SSM 混合架构，`seq_cp` / 中间回卷都不可用（坑与调参记录见 `docs/notes/qwen-rescoring.md`）。
 空前文退 BOS/EOS（qwen35 没设 `dec_start_token_id`，是 -1）。壳的装配只认 GGUF（用户目录 > 包内,`apps/macos` 的 `host/model` 与 `paths::qwen_path`）；
 CLI `--qwen <gguf>`（要 `--features qwen` 编译,参数族 `--neural-*`）。Engine 侧的新缺省:`NEURAL_GATE` = 2（个人证据保护闸）、
-`RESCORE_CONTEXT_CHARS` = 128，见 `docs/notes/qwen-rescoring.md`。
+`RESCORE_CONTEXT_CHARS` = 128；一两个音节的输入由词级候选决定，不唤醒 2B，避免单词去重前的无效推理，见 `docs/notes/qwen-rescoring.md`。
+Viterbi 侧先取 16 条并按分歧位置组合做多样化 shortlist，最终仍只给 2B 8 条，不增加神经前向数。
 
 ## crates/qingjian-lm
 

@@ -330,6 +330,10 @@ const MAX_CANDIDATES: usize = 500;
 /// CLI `--neural-paths` 可改——上探 16 要连延迟红线一起看。
 pub const RESCORE_PATHS: usize = 8;
 
+/// 两音节以下的输入不调神经重排：它们基本是单词，最终由词级候选排序，
+/// 整句路径即使打分也会因“整段本来就是一个词”而去重。跳过这批无效前向可降低真实输入功耗。
+const MIN_NEURAL_SYLLABLES: usize = 3;
+
 /// 整句候选参与跨切分比较的切分数：排最前的是贪心切分，语言模型时常更认可后面的（`bange` 的 `ban ge`），
 /// 只信第一支会把整句带偏；最多这几支都转一遍按分数挑（格子候选有缓存，多转的只是束搜索）。
 const SENTENCE_SEGMENTATIONS: usize = 4;

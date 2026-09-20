@@ -116,6 +116,24 @@ fn engine() -> Engine {
     Engine::new(Dictionary::parse("开发\tkai fa\t9000\n").unwrap())
 }
 
+#[test]
+fn two_syllable_words_do_not_wake_the_neural_scorer() {
+    let batches = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let dictionary =
+        Dictionary::parse("功耗\tgong hao\t5000\n功\tgong\t3000\n耗\thao\t2000\n").unwrap();
+    let mut engine = Engine::new(dictionary).with_sentence_scorer(
+        Box::new(RecordsBatches(batches.clone())),
+        None,
+        None,
+        None,
+    );
+    engine.set_input("gonghao");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "功耗");
+    assert!(batches.lock().unwrap().is_empty());
+    assert!(!engine.rescoring_pending());
+}
+
 fn texts(paths: &[Conversion]) -> Vec<&str> {
     paths.iter().map(|p| p.text.as_str()).collect()
 }

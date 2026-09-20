@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod diversity;
 mod english_tail;
 mod result;
 mod snapshot;
@@ -624,13 +625,22 @@ impl Engine {
     ) -> Option<Vec<Conversion>> {
         let dictionaries = self.all_dictionaries();
         let expanded = self.expand_positions(patterns, typos);
-        let rescored = self.has_sentence_scorer();
+        // 一两个音节通常是词级候选；整句结果会在 plain_sentence 去重，
+        // 为它生成 8 条路径再跑 2B 没有显示收益，却是日常输入的主要功耗。
+        let rescored = self.has_sentence_scorer() && patterns.len() >= MIN_NEURAL_SYLLABLES;
         let k = if rescored { self.neural_paths } else { 1 };
+        // 先在便宜的 Viterbi 侧多取一倍，再按文本分歧类型压回 k 条；
+        // 2B 仍只打分 k=8 条，不重现 paths=16 的 320ms 尾延迟。
+        let pool = if rescored && k > 1 {
+            k.saturating_mul(2)
+        } else {
+            k
+        };
         let paths = sentence::convert_paths(
             &dictionaries,
             &expanded.positions(),
             whole,
-            k,
+            pool,
             // 格子宽度试过接重排器时放宽到 10(让「拂」这类第 7-10 名的字进词图):净伤害 1.4 个点——
             // 多出来的低频路径把 k=16 的池挤爆,厨师/火候、直播带货 反而被顶出去,轻拂的根因也证明不在格子
             // (词图本就有它,k=64 全开也翻不了,是模型对单字拆分的偏好)。参数与缓存键的宽度支持保留作实验口。
@@ -645,6 +655,11 @@ impl Engine {
             |index, syllable| expanded.cost(index, syllable),
             &mut self.span_cache.borrow_mut(),
         );
+        let paths = if rescored {
+            diversity::shortlist(paths, k)
+        } else {
+            paths
+        };
         (!paths.is_empty()).then_some(paths)
     }
 
