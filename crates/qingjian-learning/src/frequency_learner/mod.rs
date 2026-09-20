@@ -39,11 +39,18 @@ const MAX_CHOICE_ENTRIES: usize = 50_000;
 /// 「回车原样上屏过」在选择表里的记法：词那一列写这个标记（尖括号不可能是候选词）。
 const RAW_MARK: &str = "<raw>";
 
+/// 用户词频的半衰期(天):加载时按「最后选中距今天数」指数折算,90 天前的权重剩一半。
+/// 明确添加的用户词(user-words.tsv)不折——那是用户点过「添加」的,不是行为统计。
+pub const COUNT_HALF_LIFE_DAYS: f64 = 90.0;
+
 /// 内存中的用户词频表。
 #[derive(Debug, Default)]
 pub struct FrequencyLearner {
-    /// 词 → 用户选择次数。
+    /// 词 → 用户选择次数(加载时已按半衰期折算过)。
     counts: HashMap<String, u32>,
+
+    /// 词 → 最后选中日期(YYYY-MM-DD,写入 user.tsv 第三列;空表加载的旧行没有)。
+    last_seen: HashMap<String, String>,
 
     /// 自上次保存后是否有新记录。
     dirty: bool,
@@ -106,14 +113,27 @@ impl FrequencyLearner {
     fn load_counts(&mut self, source: &str) -> usize {
         let mut skipped = 0;
         for line in data_lines(source) {
-            match line
-                .split_once('\t')
-                .and_then(|(text, count)| Some((text, count.trim().parse::<u32>().ok()?)))
-            {
-                Some((text, count)) => {
-                    self.counts.insert(text.to_owned(), count);
+            let mut fields = line.split('\t');
+            let (Some(text), Some(count)) = (fields.next(), fields.next()) else {
+                skipped += 1;
+                continue;
+            };
+            let Some(count) = count.trim().parse::<u32>().ok() else {
+                skipped += 1;
+                continue;
+            };
+            // 第三列是最后选中日期:按 90 天半衰期折算(90 天前的权重剩一半);没有日期的旧行照旧
+            let seen = fields.next().map(str::trim);
+            let decayed = seen
+                .filter(|date| !date.is_empty())
+                .and_then(tables::days_since)
+                .map(|age| (f64::from(count) * (-age / COUNT_HALF_LIFE_DAYS).exp2()).ceil() as u32)
+                .unwrap_or(count);
+            if decayed > 0 {
+                self.counts.insert(text.to_owned(), decayed);
+                if let Some(date) = seen.filter(|date| !date.is_empty()) {
+                    self.last_seen.insert(text.to_owned(), date.to_owned());
                 }
-                None => skipped += 1,
             }
         }
         skipped
@@ -180,12 +200,23 @@ impl FrequencyLearner {
     }
 
     pub fn save_to(&mut self, path: impl AsRef<Path>) -> Result<(), LearningError> {
+        let today = tables::jiff_today();
+        // 本会话动过的词(含新词)刷新为今天,旧日期原样保留——下次加载按它折算
+        for text in self.counts.keys() {
+            self.last_seen
+                .entry(text.clone())
+                .or_insert_with(|| today.clone());
+        }
         let mut rows: Vec<(&String, &u32)> = self.counts.iter().collect();
         rows.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
         write_atomic(path.as_ref(), |file| {
-            writeln!(file, "# 青简用户词频：词\\t选择次数")?;
+            writeln!(
+                file,
+                "# 青简用户词频：词\t选择次数\t最后选中日期(供 90 天半衰期折算)"
+            )?;
             for (text, count) in rows {
-                writeln!(file, "{text}\t{count}")?;
+                let date = self.last_seen.get(text).map_or("", String::as_str);
+                writeln!(file, "{text}\t{count}\t{date}")?;
             }
             Ok(())
         })?;

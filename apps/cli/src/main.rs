@@ -191,7 +191,10 @@ fn build_engine(args: &Args) -> Result<Engine, CliError> {
         engine = engine.with_emoji(table);
     }
     // 语言模型可选：没有就退化成一元词频整句；打包过的 lm.qj 优先
-    let packed = std::path::PathBuf::from("data/generated/lm.qj");
+    let packed = args
+        .lm
+        .clone()
+        .unwrap_or_else(|| std::path::PathBuf::from("data/generated/lm.qj"));
     let unigram = std::path::PathBuf::from("data/generated/lm-unigram.tsv");
     let bigram = std::path::PathBuf::from("data/generated/lm-bigram.tsv");
     if packed.is_file() || (unigram.is_file() && bigram.is_file()) {

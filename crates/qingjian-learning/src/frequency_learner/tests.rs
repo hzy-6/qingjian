@@ -363,3 +363,37 @@ fn deleting_the_learning_files_restores_the_unlearned_ranking() {
     assert_eq!(engine.learner().choice_weight("kaif", "开发"), 0);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// 时间衰减:带日期的行按 90 天半衰期折算(90 天前剩一半、180 天前剩四分之一),
+/// 不带日期的旧行照旧;写出的行带日期,本会话动过的词刷新为今天。
+#[test]
+fn counts_decay_by_last_seen_date() {
+    let mut learner = FrequencyLearner::default();
+    let old = format!("老词\t10\t{}", days_ago(120));
+    let ancient = format!("古词\t8\t{}", days_ago(300));
+    learner.load_counts(&format!("新词\t6\n{old}\n{ancient}\n"));
+    assert_eq!(learner.weight("新词"), 6, "没有日期的行照旧");
+    let d120 = days_ago(120);
+    eprintln!(
+        "DBG date={d120} days_since={:?}",
+        crate::frequency_learner::tables::days_since(&d120)
+    );
+    eprintln!("DBG weight={}", learner.weight("老词"));
+    assert_eq!(
+        learner.weight("老词"),
+        4,
+        "120 天 ≈ 1.33 个半衰期,10 → 5 折成 3(向上取整后见半衰公式)"
+    );
+    assert!(learner.weight("古词") <= 1, "300 天前几乎衰减光");
+}
+
+/// 算「N 天前」的日期字符串(本地时区)。
+fn days_ago(days: i64) -> String {
+    use jiff::Zoned;
+    use jiff::civil::Date;
+    let today: Date = Zoned::now().date();
+    let date = today
+        .checked_add(jiff::Span::new().days(-days))
+        .expect("日期减法");
+    date.strftime("%Y-%m-%d").to_string()
+}

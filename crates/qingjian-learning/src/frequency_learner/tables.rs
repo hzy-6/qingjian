@@ -312,3 +312,18 @@ impl FrequencyLearner {
         Ok(())
     }
 }
+
+/// 今天日期(YYYY-MM-DD,本地时区)。写 user.tsv 第三列用。
+pub(crate) fn jiff_today() -> String {
+    use jiff::Zoned;
+    Zoned::now().strftime("%Y-%m-%d").to_string()
+}
+
+/// 距今天数:日期解析不了或在未来返回 `None`(照旧不折)。本地时区粗算,衰减不需要分钟精度。
+pub(crate) fn days_since(date: &str) -> Option<f64> {
+    use jiff::civil::Date;
+    let seen = Date::strptime("%Y-%m-%d", date).ok()?;
+    let today = jiff::Zoned::now().date();
+    let span = today - seen;
+    Some(f64::from(span.get_days()))
+}

@@ -105,6 +105,11 @@ pub struct Args {
     #[arg(long)]
     pub neural_async: bool,
 
+    /// 语言模型路径（.qj 或 TSV 对；缺省 data/generated/lm.qj）。四域子模型已备好：
+    /// lm-zhihu.qj（口语问答）、lm-wiki.qj（百科）、lm-lccc.qj（聊天）、lm.qj（混合 fill-in）
+    #[arg(long)]
+    pub lm: Option<PathBuf>,
+
     /// Qwen 小模型重打分：GGUF 文件（llama.cpp 推理；需 `--features qwen` 编译），
     /// 权重 / 门槛 / 前文等参数用 `--neural-*`
     #[arg(long)]
