@@ -74,7 +74,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tools/release/data-fetch.sh
-          ls -la data/generated data/generated/dicts data/model
+          ls -la data/generated data/generated/dicts data/model 2>/dev/null || ls -la data/generated data/generated/dicts
 
       - name: Import signing certificates
         if: steps.secrets.outputs.sign == 'true'
@@ -123,8 +123,8 @@ jobs:
           shasum -a 256 ./*.pkg | tee SHA256SUMS
           jq -n --arg version "$VERSION" --arg tag "$GITHUB_REF_NAME" --arg commit "$GITHUB_SHA" \
             --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg toolchain "$(rustc --version)" \
-            --arg runner "macOS $(sw_vers -productVersion)" --arg data_tag "$DATA_TAG" --arg data_sha256 "$DATA_SHA256" --arg model_sha256 "$MODEL_SHA256" \
-            '{version: $version, tag: $tag, commit: $commit, built_at: $built_at, toolchain: $toolchain, runner: $runner, data_tag: $data_tag, data_sha256: $data_sha256, model_sha256: $model_sha256}' \
+            --arg runner "macOS $(sw_vers -productVersion)" --arg data_tag "$DATA_TAG" --arg data_sha256 "$DATA_SHA256" \
+            '{version: $version, tag: $tag, commit: $commit, built_at: $built_at, toolchain: $toolchain, runner: $runner, data_tag: $data_tag, data_sha256: $data_sha256}' \
             | tee build-info.json
 
       - name: Create GitHub release
