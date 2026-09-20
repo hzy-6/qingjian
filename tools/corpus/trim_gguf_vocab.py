@@ -2,8 +2,9 @@
 """把 Qwen3.5 GGUF 的词嵌入裁成纯中文输入法需要的行。
 
 保留 id 0..KEEP_INCLUSIVE(全部 CJK/拉丁/符号),之后的行(多语言碎片、图像/音频/tts/pad 专用
-token)整段裁掉;token_embd 按行删块(Q8_0 每行 hidden/32 个 34 字节块),词表 / 类型 /
-eos 元数据同步重写,白名单里的特殊 token 追加到词表末尾。
+token)整段裁掉;token_embd 按行删块——行宽按实测(张量总字节 ÷ 词表行数),对任意量化布局成立
+(UD 混合量化的 embd 是 Q6_K,按 Q8_0 假设算会切坏);词表 / 类型 / eos 元数据同步重写,
+白名单里的特殊 token 追加到词表末尾。
 
 用法: python3 trim_gguf_vocab.py <in.gguf> <out.gguf> <keep_inclusive> [白名单token …]
 """

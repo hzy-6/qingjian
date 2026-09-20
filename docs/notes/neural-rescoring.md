@@ -1,5 +1,9 @@
 # 字级 Transformer 重打分：评测（2026-09-08）
 
+> **退役注记(2026-09-20)**:本文描述的字级 Transformer(.qjm/candle)重打分已整体移除,
+> 现役是 Qwen GGUF(llama.cpp),见 [qwen-rescoring.md](qwen-rescoring.md);本文的机制描述(分歧链、缓存、异步重排)仍然成立,只是换了打分器。
+
+
 ## 做了什么
 
 - 训练：训练仓库 `../train`（私有，与本仓库并列放在 `~/Github/Projects/qingjian/` 下）在中文维基完整 dump + LCCC（12.7 亿 token、字表 19147）上训了两档字级 decoder：

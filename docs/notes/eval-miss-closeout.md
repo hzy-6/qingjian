@@ -1,5 +1,9 @@
 # 整句评测剩余 miss 收尾记录（2026-09-18）
 
+> **退役注记(2026-09-20)**:文中 `--neural data/model/model.qjm` 命令已失效(该模型与 crate 已移除),
+> 现用 `--qwen <gguf>`;数字为当时口径,保留作历史对照。
+
+
 > **2026-09-18 晚更新**：随包神经模型已替换为 [uer/gpt2-chinese-cluecorpussmall](https://huggingface.co/uer/gpt2-chinese-cluecorpussmall)（Apache-2.0，102M）转制版
 >（词表重排 + 独立输出头适配，加载器支持可选 `head.weight`）。评测（含 IT 词库）**首选 87.1% / 字准确率 98.7%**，下表 22 条 miss 中 5 条翻案
 >
