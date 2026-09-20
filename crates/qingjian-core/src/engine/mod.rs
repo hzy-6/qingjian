@@ -186,6 +186,9 @@ pub struct Engine {
     /// 最近一次查询的候选顺序是否经过神经重排（`rescore_paths` 置位，`query` 开头清零），写进输入日志。
     last_rescored: std::cell::Cell<bool>,
 
+    /// 最近一次神经重排的探针快照（重排池与前后的首选）：评测算 oracle / 翻案方向的诊断量。
+    rerank_probe: std::cell::RefCell<Option<rescoring::RerankProbe>>,
+
     /// 这段组句里第一次退格前的缓冲区：上屏时与最终键串不同就记一条 `retype`。
     retype_snapshot: Option<String>,
 
@@ -399,6 +402,7 @@ impl Engine {
             private: false,
             log_sequence: 0,
             last_rescored: std::cell::Cell::new(false),
+            rerank_probe: std::cell::RefCell::new(None),
             retype_snapshot: None,
             passthrough_pending: String::new(),
             page_turns: 0,

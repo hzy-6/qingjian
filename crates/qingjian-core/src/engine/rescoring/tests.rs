@@ -150,6 +150,25 @@ fn sync_scorer_reorders_paths_in_place() {
     assert!(!engine.rescoring_pending());
 }
 
+/// 探针:重排池按静态排名进池、记录重排前后的首选——评测算 oracle / 转化 / 翻坏的依据。
+#[test]
+fn the_probe_records_pool_and_flip_directions() {
+    let engine = engine().with_sentence_scorer(Box::new(Prefers("开放")), Some(0.5), None, None);
+    assert!(engine.rerank_probe().is_none());
+    let mut paths = vec![path("开饭", -10.0), path("开放", -11.0)];
+    engine.rescore_paths(&mut paths);
+    let probe = engine.rerank_probe().unwrap();
+    assert_eq!(probe.pool, ["开饭", "开放"]);
+    assert_eq!(probe.top_before.as_deref(), Some("开饭"));
+    assert_eq!(probe.top_after.as_deref(), Some("开放"));
+    // 池只有一条的早退也记(oracle 统计要知道"根本没得选"的句子)
+    let mut single = vec![path("开发", -10.0)];
+    engine.rescore_paths(&mut single);
+    let probe = engine.rerank_probe().unwrap();
+    assert_eq!(probe.pool, ["开发"]);
+    assert_eq!(probe.top_before, probe.top_after);
+}
+
 #[test]
 fn sync_scorer_receives_surrounding_after_text() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));

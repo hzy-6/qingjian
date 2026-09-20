@@ -32,6 +32,24 @@ pub struct Report {
 
     /// 没命中首选的例子。
     pub misses: Vec<String>,
+
+    /// 有重排探针的句子数(分母;没接打分器时为 0)。
+    pub probed: usize,
+
+    /// 重排池里含原句的句子数(oracle:正确句有没有送进模型)。
+    pub oracle_hit: usize,
+
+    /// 池内原句名次之和与命中数(算平均名次)。
+    pub oracle_rank_sum: usize,
+
+    /// 静态首选不是原句、重排后变成原句的句子数(翻案转化)。
+    pub converted: usize,
+
+    /// 静态首选是原句、重排后不再是原句的句子数(翻坏)。
+    pub harmful_flips: usize,
+
+    /// 静态首选就是原句的句子数(翻坏的分母)。
+    pub static_top1: usize,
 }
 
 impl Report {
@@ -48,6 +66,16 @@ fn percent(part: usize, whole: usize) -> String {
     }
 }
 
+impl Report {
+    /// 池内原句平均名次(1 起;只算进了池的)。
+    pub fn oracle_avg_rank(&self) -> f64 {
+        if self.oracle_hit == 0 {
+            0.0
+        } else {
+            self.oracle_rank_sum as f64 / self.oracle_hit as f64
+        }
+    }
+}
 impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "整句评测（冷启动，不学习，不写文件）")?;
@@ -66,6 +94,18 @@ impl fmt::Display for Report {
                 "查询平均 {:.1} ms，最慢 {:.1} ms",
                 self.query_time.as_secs_f64() * 1000.0 / evaluated as f64,
                 self.slowest_query.as_secs_f64() * 1000.0,
+            )?;
+        }
+        if self.probed > 0 {
+            writeln!(
+                f,
+                "重排池 oracle {:>6}（池内平均名次 {:.2}）  翻案转化 {:>6}  翻坏 {:>6}（静态首选对 {}/{}）",
+                percent(self.oracle_hit, self.probed),
+                self.oracle_avg_rank(),
+                percent(self.converted, self.probed.saturating_sub(self.static_top1)),
+                percent(self.harmful_flips, self.static_top1),
+                self.static_top1,
+                self.probed,
             )?;
         }
         if self.unparsable > 0 {

@@ -126,6 +126,24 @@ fn evaluate(engine: &mut Engine, pair: &Pair, report: &mut Report, show_misses: 
     let elapsed = started.elapsed();
     report.query_time += elapsed;
     report.slowest_query = report.slowest_query.max(elapsed);
+    // 重排探针:正确句有没有送进模型、被往哪个方向翻
+    if let Some(probe) = engine.rerank_probe() {
+        report.probed += 1;
+        if let Some(rank) = probe.pool.iter().position(|text| text == &pair.text) {
+            report.oracle_hit += 1;
+            report.oracle_rank_sum += rank + 1;
+        }
+        let before_right = probe.top_before.as_deref() == Some(pair.text.as_str());
+        let after_right = probe.top_after.as_deref() == Some(pair.text.as_str());
+        if before_right {
+            report.static_top1 += 1;
+            if !after_right {
+                report.harmful_flips += 1;
+            }
+        } else if after_right {
+            report.converted += 1;
+        }
+    }
     let items = &query.candidates.items;
     let position = items.iter().position(|c| c.text == pair.text);
     if position == Some(0) {

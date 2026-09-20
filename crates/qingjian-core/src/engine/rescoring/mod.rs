@@ -7,6 +7,7 @@
 //! 按键回调永远不等模型：先按词级模型出候选，模型的意见晚几十毫秒到。
 
 mod cache;
+mod probe;
 mod worker;
 
 #[cfg(test)]
@@ -15,9 +16,16 @@ mod tests;
 use super::*;
 
 pub(crate) use cache::NeuralCache;
+pub use probe::RerankProbe;
 pub(crate) use worker::RescoreWorker;
 
 impl Engine {
+    /// 最近一次神经重排的探针快照（没有重排发生是 `None`）。评测用它算:
+    /// 重排池 oracle（正确句有没有送进模型）、翻案转化（静态错的被翻对）、翻坏（静态对的被翻错）。
+    pub fn rerank_probe(&self) -> Option<RerankProbe> {
+        self.rerank_probe.borrow().clone()
+    }
+
     /// 接了重打分器（同步或异步）。
     pub fn has_sentence_scorer(&self) -> bool {
         self.sentence_scorer.is_some()
@@ -67,8 +75,18 @@ impl Engine {
     /// 保持原顺序分量——NaN 进了分数会把排序比较器整个毒掉。
     pub(super) fn rescore_paths(&self, paths: &mut [Conversion]) {
         if paths.len() < 2 || !self.has_sentence_scorer() {
+            // 池只有一条:照样记探针(oracle 统计要知道"根本没得选"的句子)
+            if paths.len() == 1 {
+                *self.rerank_probe.borrow_mut() = Some(RerankProbe {
+                    pool: vec![paths[0].text.clone()],
+                    top_before: Some(paths[0].text.clone()),
+                    top_after: Some(paths[0].text.clone()),
+                });
+            }
             return;
         }
+        let probe_pool: Vec<String> = paths.iter().map(|path| path.text.clone()).collect();
+        let top_before = paths.first().map(|path| path.text.clone());
         let context = self.rescoring_context();
         let after = self.rescoring_after();
         let cache_context = format!("{context}\0{after}");
@@ -155,6 +173,11 @@ impl Engine {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        *self.rerank_probe.borrow_mut() = Some(RerankProbe {
+            pool: probe_pool,
+            top_before,
+            top_after: paths.first().map(|path| path.text.clone()),
         });
         self.last_rescored.set(true);
     }
