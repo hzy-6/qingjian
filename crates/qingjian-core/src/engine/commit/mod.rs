@@ -112,6 +112,11 @@ impl Engine {
                 self.learner.record(candidate);
                 let (consumed, input) = self.consumed_by(candidate);
                 self.learner.record_choice(&input, &candidate.text);
+                // 选择同时按候选全拼记一份:wod 下选的 我的,之后 wode 也能直接受益(反之亦然)
+                let canonical: String = candidate.syllables.concat();
+                if canonical != input {
+                    self.learner.record_choice(&canonical, &candidate.text);
+                }
                 typos = self.accepted_typos(candidate);
                 (consumed, input)
             }
@@ -137,6 +142,10 @@ impl Engine {
                 self.learner.record(candidate);
                 let (consumed, input) = self.whole_scope();
                 self.learner.record_choice(&input, &candidate.text);
+                let canonical: String = candidate.syllables.concat();
+                if canonical != input {
+                    self.learner.record_choice(&canonical, &candidate.text);
+                }
                 (consumed, input)
             }
             // 英文词与快捷候选对应整段作用域；选中的英文词记次数并进个人英文词表，下次同样的前缀它靠前
@@ -250,6 +259,7 @@ impl Engine {
                     CandidateKind::Chinese | CandidateKind::Cloud
                 )
                 .then(|| candidate.text.clone()),
+                canonical: candidate.syllables.concat(),
                 transitions: std::mem::take(&mut self.recording),
                 typos,
                 erased: 0,
@@ -336,6 +346,9 @@ impl Engine {
         if let Some(chosen) = &last.chosen {
             self.learner.unrecord(chosen);
             self.learner.unrecord_choice(&last.input, chosen);
+            if !last.canonical.is_empty() && last.canonical != last.input {
+                self.learner.unrecord_choice(&last.canonical, chosen);
+            }
         }
         for transition in &last.transitions {
             self.learner.unrecord_transition(

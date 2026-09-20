@@ -231,9 +231,12 @@ impl Engine {
             let covered = correction
                 .as_ref()
                 .map_or(item.coverage, |c| c.to_original(item.coverage));
+            // 选择按输入串与候选全拼各记了一份(wod 与 wode 互通),查询取两者最大
+            let canonical: String = hit.syllables().collect::<Vec<_>>().concat();
             let choice = letters
                 .get(..covered)
-                .map_or(0, |input| self.learner.choice_weight(input, hit.text));
+                .map_or(0, |input| self.learner.choice_weight(input, hit.text))
+                .max(self.learner.choice_weight(&canonical, hit.text));
             let log_prob = sentence::transition_log_prob(
                 &*self.language_model,
                 self.personal(),

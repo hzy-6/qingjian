@@ -298,6 +298,7 @@ impl Engine {
             chars: traditional_text.chars().count(),
             input,
             chosen: None,
+            canonical: String::new(),
             transitions: std::mem::take(&mut self.recording),
             typos: Vec::new(),
             erased: 0,

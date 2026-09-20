@@ -130,3 +130,26 @@ fn rescoring_queries_do_not_duplicate_learning() {
     assert_eq!(engine.learner().weight("开"), 0);
     assert_eq!(engine.learner().weight("先"), 0);
 }
+
+/// 选择按输入串与候选全拼各记一份:`kaif` 下选的 开发,`kaifa` 查询直接受益(反向同理)。
+#[test]
+fn choices_generalize_across_the_candidate_full_pinyin() {
+    let mut engine = engine().with_learner(Box::new(CountingLearner(HashMap::new())));
+    // 敲前缀 kaif 选 开发(词级候选):input=kaif,候选全拼 kaifa ≠ kaif → 双键
+    engine.set_input("kaif");
+    let query = engine.query().unwrap();
+    let kaifa = query
+        .candidates
+        .items
+        .iter()
+        .find(|c| c.text == "开发")
+        .cloned()
+        .unwrap();
+    engine.commit(&kaifa);
+    assert_eq!(engine.learner().choice_weight("kaif", "开发"), 1);
+    // 规范全拼键 kaifa 下也有一份
+    assert_eq!(engine.learner().choice_weight("kaifa", "开发"), 1);
+    // 全拼 kaifa 查询:开发 按自身全拼查到记录,排到 开放 前面(开放 的全拼是 kai fang,不共享这份)
+    engine.set_input("kaifa");
+    assert_eq!(texts_of(&engine)[0], "开发");
+}

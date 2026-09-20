@@ -16,6 +16,9 @@ pub struct LastCommit {
     /// 记过一次选择次数（`Learner::record`）与输入串选择（`record_choice`）的词；整句上屏没有。
     pub chosen: Option<String>,
 
+    /// 上屏词的规范全拼（音节连写）:选择同时按它记了一份（`wod` 与 `wode` 互通）,撤销时对称退回。
+    pub canonical: String,
+
     /// 记过的词转移（含上文与份数）。
     pub transitions: Vec<Transition>,
 
@@ -40,6 +43,7 @@ impl LastCommit {
             chars: text.chars().count(),
             input: String::new(),
             chosen: None,
+            canonical: String::new(),
             transitions: Vec::new(),
             typos: Vec::new(),
             erased: 0,
