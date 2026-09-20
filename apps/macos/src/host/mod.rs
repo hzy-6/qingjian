@@ -155,7 +155,7 @@ pub struct Host {
     /// 本地整句模型的防抖与轮询定时器。
     rescore: RescoreMonitor,
 
-    /// 正在后台加载的模型（Qwen GGUF 首选，`.qjm` 兜底）；加载完接到 Engine 上就清掉。
+    /// 正在后台加载的 Qwen GGUF 模型；加载完接到 Engine 上就清掉。
     model_loader: Option<std::sync::mpsc::Receiver<model::LoadedModel>>,
 
     /// 上次套用的 `[model]`，变了才重载 / 卸载。

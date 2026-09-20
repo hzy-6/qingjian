@@ -81,11 +81,7 @@ pub struct Args {
     #[arg(long)]
     pub shuangpin: Option<String>,
 
-    /// 神经重打分：字级 Transformer 的 .qjm 文件或导出目录（model.safetensors / config.json / vocab.json），整句前几条路径用它重排
-    #[arg(long)]
-    pub neural: Option<PathBuf>,
-
-    /// 神经重打分的权重 λ（0 到 1，缺省 0.5）：最终分 = 路径分 + λ·(神经分 − 静态二元分)，个人学习与代价不受影响
+    /// 神经重打分的权重 λ（0 到 1，缺省 0.75）：最终分 = 路径分 + λ·(神经分 − 静态二元分)，个人学习与代价不受影响
     #[arg(long)]
     pub neural_weight: Option<f64>,
 
@@ -97,7 +93,7 @@ pub struct Args {
     #[arg(long)]
     pub neural_context: Option<usize>,
 
-    /// 神经重打分看 Viterbi 的前几条路径（缺省 16）：调大要连 --neural-margin 一起放宽，margin 在打分前删路径
+    /// 神经重打分看 Viterbi 的前几条路径（缺省 8）：调大要连 --neural-margin 一起放宽，margin 在打分前删路径
     #[arg(long)]
     pub neural_paths: Option<usize>,
 
@@ -109,9 +105,9 @@ pub struct Args {
     #[arg(long)]
     pub neural_async: bool,
 
-    /// Qwen 小模型重打分：GGUF 文件（llama.cpp 推理；需 `--features qwen` 编译），与 `--neural` 互斥，
-    /// 权重 / 门槛 / 前文等参数沿用 `--neural-*`
-    #[arg(long, conflicts_with = "neural")]
+    /// Qwen 小模型重打分：GGUF 文件（llama.cpp 推理；需 `--features qwen` 编译），
+    /// 权重 / 门槛 / 前文等参数用 `--neural-*`
+    #[arg(long)]
     pub qwen: Option<PathBuf>,
 
     /// 逐键模式：把每个输入当作一键一键敲进去，每个前缀都查一次，打印每键各阶段耗时（性能测试用）
