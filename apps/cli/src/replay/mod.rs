@@ -57,6 +57,8 @@ pub fn run(engine: &mut Engine, path: &Path, show_misses: usize) -> Result<Repor
                 report.prediction_pending = true;
             }
             InputLogEntry::Commit(commit) => {
+                report.chars += commit.text.chars().count();
+                report.page_turns += commit.pages as usize;
                 // 2026-09-12 以前的日志里壳每次回车 / 失焦都记一条空的原样上屏，不算数
                 if commit.keys.is_empty() && commit.text.is_empty() {
                     // 那一条对应的是一次回车 / 失焦：上文链照样断，只是不计数

@@ -28,6 +28,12 @@ pub struct Report {
     /// 重打条数（组句内退格重打 + 上屏后删掉重打）。
     pub retypes: usize,
 
+    /// 上屏的总字符数（算每千字努力度）。
+    pub chars: usize,
+
+    /// 翻页总次数（用户为找到想要的词翻的页）。
+    pub page_turns: usize,
+
     /// 会话行数、上文断开数、直通字符数。
     pub sessions: usize,
     pub breaks: usize,
@@ -158,6 +164,18 @@ impl fmt::Display for Report {
         }
         if self.retypes > 0 {
             writeln!(f, "退格重打 {} 次", self.retypes)?;
+        }
+        // 每千字努力度:换选(retract)+重打(retype)+翻页,比首选命中率更贴近真实输入体验
+        if self.chars > 0 {
+            let per_k = |n: usize| n as f64 * 1000.0 / self.chars as f64;
+            writeln!(
+                f,
+                "用户努力度:每千字 换选 {:.1} / 重打 {:.1} / 翻页 {:.1}（共 {} 字）",
+                per_k(self.retracts),
+                per_k(self.retypes),
+                per_k(self.page_turns),
+                self.chars,
+            )?;
         }
         if self.predictions > 0 {
             writeln!(
