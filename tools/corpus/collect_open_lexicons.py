@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import collections
 import csv
+import json
 import re
 import subprocess
 import tempfile
@@ -27,6 +28,14 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--luna", type=Path, required=True, help="Rime Luna Pinyin dict yaml")
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--corpus", type=Path, action="append", default=[])
+    parser.add_argument(
+        "--input-log", type=Path,
+        help="本机 input-log.jsonl；只统计未撤销的 word 上屏，不把日志原文写入输出",
+    )
+    parser.add_argument(
+        "--min-log-commits", type=int, default=0,
+        help="至少有多少次真实词上屏；默认 0 保留全部候选",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--min-corpus-count", type=int, default=2)
     return parser.parse_args()
@@ -108,6 +117,30 @@ def corpus_counts(words: list[str], corpora: list[Path]) -> collections.Counter[
     return counts
 
 
+def committed_word_counts(path: Path) -> collections.Counter[str]:
+    """只把最终未撤销的词候选算作用户需求；会话重启后 id 从头计数。"""
+    committed: dict[tuple[int, int], str] = {}
+    retracted: set[tuple[int, int]] = set()
+    session = 0
+    with path.open(encoding="utf-8") as rows:
+        for row in rows:
+            try:
+                item = json.loads(row)
+            except json.JSONDecodeError:
+                continue
+            event = item.get("event")
+            if event == "session":
+                session += 1
+            elif event == "commit" and item.get("source") == "word":
+                if isinstance(item.get("id"), int) and isinstance(item.get("text"), str):
+                    committed[(session, item["id"])] = item["text"]
+            elif event == "retract" and isinstance(item.get("of"), int):
+                retracted.add((session, item["of"]))
+    return collections.Counter(
+        word for key, word in committed.items() if key not in retracted
+    )
+
+
 def main() -> None:
     args = arguments()
     known = load_known(args.repo)
@@ -121,19 +154,30 @@ def main() -> None:
     )
     eligible_count = len(words)
     counts = corpus_counts(words, args.corpus)
+    log_counts = committed_word_counts(args.input_log) if args.input_log else collections.Counter()
     words = [word for word in words if counts[word] >= args.min_corpus_count]
-    words.sort(key=lambda word: (counts[word], jieba[word], essay[word], word), reverse=True)
+    words = [word for word in words if log_counts[word] >= args.min_log_commits]
+    words.sort(
+        key=lambda word: (log_counts[word], counts[word], jieba[word], essay[word], word),
+        reverse=True,
+    )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8", newline="") as target:
         writer = csv.writer(target, delimiter="\t", lineterminator="\n")
-        writer.writerow(["# word", "pinyin_upstream", "corpus_hits", "jieba_freq", "essay_weight"])
+        writer.writerow([
+            "# word", "pinyin_upstream", "local_word_commits", "corpus_hits",
+            "jieba_freq", "essay_weight",
+        ])
         for word in words:
-            writer.writerow([word, luna[word], counts[word], jieba[word], essay[word]])
+            writer.writerow([
+                word, luna[word], log_counts[word], counts[word], jieba[word], essay[word],
+            ])
 
     print(
         f"known={len(known)} three_source_missing={eligible_count} "
-        f"corpus_confirmed={len(words)} output={args.output}"
+        f"corpus_confirmed={len(words)} local_word_commits={sum(log_counts[word] for word in words)} "
+        f"output={args.output}"
     )
 
 
