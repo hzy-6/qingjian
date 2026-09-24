@@ -15,3 +15,5 @@ qingjian-format.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 zerocopy.workspace = true
+fst.workspace = true
+memmap2.workspace = true

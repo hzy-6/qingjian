@@ -304,6 +304,30 @@ impl LanguageModel for BigramModel {
         };
         Some(probability.max(f64::MIN_POSITIVE).ln())
     }
+
+    fn successors(&self, previous: &str, limit: usize) -> Vec<(String, u32)> {
+        let Some(prev_id) = self.word_id(previous) else {
+            return Vec::new();
+        };
+        let (Some(&start), Some(&end)) = (
+            self.offsets.get(prev_id as usize),
+            self.offsets.get(prev_id as usize + 1),
+        ) else {
+            return Vec::new();
+        };
+        let mut rows: Vec<(String, u32)> = self.successors[start as usize..end as usize]
+            .iter()
+            .map(|successor| {
+                (
+                    word_text(&self.words, &self.entries[successor.word as usize]).to_owned(),
+                    successor.count,
+                )
+            })
+            .collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        rows.truncate(limit);
+        rows
+    }
 }
 
 #[cfg(test)]
@@ -327,6 +351,20 @@ mod tests {
         let alone = model.log_prob(Some("火星"), "想").unwrap();
         assert!((alone - (30.0_f64 / 101.0).ln()).abs() < 1e-9);
         assert_eq!(model.log_prob(Some("我"), "火星"), None);
+    }
+
+    #[test]
+    fn successors_are_count_ordered_and_truncated() {
+        let model = BigramModel::parse(UNIGRAM, BIGRAM).unwrap();
+        assert_eq!(
+            model.successors("我", 10),
+            vec![("想".to_owned(), 25), ("翔".to_owned(), 1)]
+        );
+        // limit 截断：只剩计数最高的
+        assert_eq!(model.successors("我", 1), vec![("想".to_owned(), 25)]);
+        // 句首标记也有后继；不认识的词没有
+        assert_eq!(model.successors("<s>", 10), vec![("我".to_owned(), 40)]);
+        assert!(model.successors("火星", 10).is_empty());
     }
 
     #[test]

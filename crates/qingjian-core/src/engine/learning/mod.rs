@@ -81,7 +81,7 @@ impl Engine {
     pub(super) fn meter_commit(&mut self, text: &str, source: InputSource, english_word: bool) {
         let mut usage = Usage::of_text(text);
         usage.words = match source {
-            InputSource::Word | InputSource::Cloud => 1,
+            InputSource::Word | InputSource::Cloud | InputSource::Local => 1,
             InputSource::Sentence | InputSource::CloudSentence => {
                 sentence::segment_text(text, &*self.language_model).map_or(usage.hanzi, |clauses| {
                     clauses.iter().map(|words| words.len() as u64).sum()
@@ -158,7 +158,9 @@ impl Engine {
         }
         let candidate = &candidate_owned;
         let forgotten = match candidate.kind {
-            CandidateKind::Chinese | CandidateKind::Cloud => self.learner.forget(&candidate.text),
+            CandidateKind::Chinese | CandidateKind::Cloud | CandidateKind::Local => {
+                self.learner.forget(&candidate.text)
+            }
             CandidateKind::English => Forgotten {
                 user_word: self.learner.forget_english(&candidate.text),
                 learning: false,

@@ -129,8 +129,9 @@ impl Engine {
             }
             // emoji 按它对应词的音节消耗拼音，不记学习
             CandidateKind::Emoji => self.consumed_by(candidate),
-            // 云端词是针对整段作用域要的（拼音可能有错，按音节对不上），上屏吃掉整段；词库里没有的记成用户词
-            CandidateKind::Cloud => {
+            // 云端词 / 本机联想词都是针对整段作用域要的（拼音可能有错，按音节对不上），上屏吃掉整段；
+            // 词库里没有的记成用户词
+            CandidateKind::Cloud | CandidateKind::Local => {
                 if let Some(syllables) = self.learned_syllables(candidate) {
                     let learned = Candidate {
                         syllables,
@@ -196,7 +197,7 @@ impl Engine {
         self.composition.drain_prefix(consumed);
         let buffer_left = !self.composition.is_empty();
         match candidate.kind {
-            CandidateKind::Chinese | CandidateKind::Cloud => {
+            CandidateKind::Chinese | CandidateKind::Cloud | CandidateKind::Local => {
                 self.record_word(
                     &candidate.text,
                     &candidate.syllables,

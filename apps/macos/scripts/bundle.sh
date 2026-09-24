@@ -103,6 +103,15 @@ if [[ -f data/generated/dict.tsv || -f data/generated/dict.qj ]]; then
     echo "打包 Qwen 模型：$gguf"
     break
   done
+  # 字符级整句提议模型（mmap 的字符 n-gram FST，path::char_model_path 从 Resources/model/ 找）。
+  # 它是重排的增益项（895 混域集 oracle 68.5%→79.5%），但一份上百 MB，随包与否由 QINGJIAN_CHAR_MODEL 定：
+  # 给了路径就打包（如 data/generated/char5.fst），不给就不带。
+  if [[ -n "${QINGJIAN_CHAR_MODEL:-}" && -f "$QINGJIAN_CHAR_MODEL" ]]; then
+    mkdir -p "$APP/Contents/Resources/model"
+    cp "$QINGJIAN_CHAR_MODEL" "$APP/Contents/Resources/model/char5.fst"
+    chmod 644 "$APP/Contents/Resources/model/char5.fst"
+    echo "打包字符级整句提议模型：$QINGJIAN_CHAR_MODEL"
+  fi
   # 释义表打成 .qj（TSV 比 .qj 新时重打），英文词表仍是 TSV。各表来源不同，元数据按表写（见 assets/glossary/README.md）
   for lang in en ja zh es; do
     src="assets/glossary/glossary-$lang.tsv"

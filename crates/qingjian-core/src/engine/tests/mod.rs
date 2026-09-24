@@ -181,6 +181,7 @@ fn cloud(text: &str, syllables: &[&str]) -> CloudWord {
         text: text.into(),
         syllables: syllables.iter().map(|s| (*s).to_owned()).collect(),
         reading: None,
+        local: false,
     }
 }
 

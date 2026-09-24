@@ -12,6 +12,9 @@ pub enum InputSource {
     /// 云端词。
     Cloud,
 
+    /// 本机模型给的联想词（本地联想 / 同音纠错）。
+    Local,
+
     /// 本地整句转换。
     Sentence,
 
@@ -42,6 +45,7 @@ impl From<CandidateKind> for InputSource {
         match kind {
             CandidateKind::Chinese => Self::Word,
             CandidateKind::Cloud => Self::Cloud,
+            CandidateKind::Local => Self::Local,
             CandidateKind::Sentence => Self::Sentence,
             CandidateKind::English => Self::English,
             CandidateKind::Shortcut => Self::Shortcut,

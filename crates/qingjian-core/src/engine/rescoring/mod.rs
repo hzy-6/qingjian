@@ -18,6 +18,7 @@ use super::*;
 
 pub(crate) use cache::NeuralCache;
 pub use context::select_context;
+pub(super) use context::split_window;
 pub use probe::RerankProbe;
 pub(crate) use worker::RescoreWorker;
 
@@ -34,19 +35,25 @@ impl Engine {
             || self.rescorer.as_ref().is_some_and(RescoreWorker::is_alive)
     }
 
-    /// 给模型看的前文：壳给了应用里的光标前文就用它（[`Self::set_rescoring_context`]），
-    /// 否则用本会话最近上屏的字符；长度按 `neural_context` 截。
-    pub(super) fn rescoring_context(&self) -> String {
+    /// 给模型看的双向窗口：总预算 `neural_context` 按 [`split_window`] 自适应切分——
+    /// 两侧都有文本对半分（200 字 → 前 100 + 后 100），只有一侧全给那一侧。
+    /// 前文按句界结构化装填（[`select_context`]），后文取头部；壳没给前文时退本会话历史（后文照给）。
+    pub(super) fn rescoring_window(&self) -> (String, String) {
         if self.neural_context == 0 {
-            return String::new();
+            return (String::new(), String::new());
         }
-        match &self.rescoring_before {
-            Some(before) => select_context(before, self.neural_context),
-            None => select_context(
-                self.history.recent(self.neural_context * 2),
-                self.neural_context,
-            ),
-        }
+        let history; // 借的宿主：历史回退分支里要让字符串活到函数尾
+        let (before_src, after_src) = match (&self.rescoring_before, &self.rescoring_after) {
+            (Some(before), after) => (before.as_str(), after.as_deref().unwrap_or("")),
+            (None, after) => {
+                history = self.history.recent(self.neural_context * 2);
+                (history, after.as_deref().unwrap_or(""))
+            }
+        };
+        let (left_budget, right_budget) = split_window(before_src, after_src, self.neural_context);
+        let left = select_context(before_src, left_budget);
+        let right: String = after_src.chars().take(right_budget).collect();
+        (left, right)
     }
 
     /// 壳告知应用里光标前的文本（每次查询前给；应用给不出就 `None`，退回本会话历史）。
@@ -61,8 +68,15 @@ impl Engine {
         self.rescoring_after = after;
     }
 
-    fn rescoring_after(&self) -> String {
-        self.rescoring_after.clone().unwrap_or_default()
+    /// 把当前存着的应用前后文（重排那次读的）交回去：联想重新要一次上下文时不用再找应用要。
+    /// 壳没给过应用文本就是 `None`。
+    pub fn rescoring_surrounding(&self) -> Option<SurroundingText> {
+        self.rescoring_before
+            .as_ref()
+            .map(|before| SurroundingText {
+                before: before.clone(),
+                after: self.rescoring_after.clone().unwrap_or_default(),
+            })
     }
 
     /// 本次重排用的神经修正上限（nat）：用户配置（[`Engine::set_neural_max_adjustment`]）优先，
@@ -93,8 +107,7 @@ impl Engine {
         }
         let probe_pool: Vec<String> = paths.iter().map(|path| path.text.clone()).collect();
         let top_before = paths.first().map(|path| path.text.clone());
-        let context = self.rescoring_context();
-        let after = self.rescoring_after();
+        let (context, after) = self.rescoring_window();
         let cache_context = format!("{context}\0{after}");
         let mut cache = self.neural_cache.borrow_mut();
         cache.ensure_context(&cache_context);
@@ -201,7 +214,7 @@ impl Engine {
             return false;
         };
         let mut cache = self.neural_cache.borrow_mut();
-        let wanted = cache.take_wanted();
+        let wanted = cache.take_wanted(RESCORE_BATCH_MAX);
         if wanted.is_empty() {
             return false;
         }

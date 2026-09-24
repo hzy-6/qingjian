@@ -30,6 +30,7 @@ pub fn run(
     save: Option<&Path>,
     jsonl: Option<&Path>,
     show_misses: usize,
+    probe_correction: bool,
 ) -> Result<Report, EvalError> {
     let mut report = Report::default();
     let pairs = collect(engine, paths, &mut report)?;
@@ -57,7 +58,7 @@ pub fn run(
         })
         .transpose()?;
     for pair in &pairs {
-        if let Some(record) = evaluate(engine, pair, &mut report, show_misses)
+        if let Some(record) = evaluate(engine, pair, &mut report, show_misses, probe_correction)
             && let Some(writer) = &mut jsonl
         {
             serde_json::to_writer(&mut *writer, &record).map_err(EvalError::Json)?;
@@ -143,6 +144,7 @@ fn evaluate(
     pair: &Pair,
     report: &mut Report,
     show_misses: usize,
+    probe_correction: bool,
 ) -> Option<DistillRecord> {
     report.total += 1;
     engine.clear();
@@ -169,6 +171,7 @@ fn evaluate(
     report.query_time += elapsed;
     report.slowest_query = report.slowest_query.max(elapsed);
     // 重排探针:正确句有没有送进模型、被往哪个方向翻
+    // 必须先读：下面的本地联想探针会再跑一次整句转换（`local_conversion`），而转换内部会写重排探针
     let probe = engine.rerank_probe();
     if let Some(probe) = &probe {
         report.probed += 1;
@@ -186,6 +189,10 @@ fn evaluate(
         } else if after_right {
             report.converted += 1;
         }
+    }
+    // 本地联想 / 同音纠错：这一句跑一次联想，看词槽里有没有原句（不改变候选排序，单独一把尺）
+    if probe_correction {
+        measure_correction(engine, pair, report, &query.candidates.items);
     }
     let items = &query.candidates.items;
     let position = items.iter().position(|c| c.text == pair.text);
@@ -248,6 +255,49 @@ fn evaluate(
     };
     engine.clear();
     Some(record)
+}
+
+/// 本地联想 / 同音纠错探针：这一句发一次联想请求，看词槽（纠错候选 / 深池词）里有没有原句。
+/// 与重排探针分开：联想不参与候选排序，这是一把独立的尺。
+fn measure_correction(
+    engine: &mut Engine,
+    pair: &Pair,
+    report: &mut Report,
+    candidates: &[qingjian_core::Candidate],
+) {
+    if engine.request_prediction(None, candidates).is_none() {
+        return; // 音节太短 / 没模型 / 没开本地联想：这句不进分母
+    }
+    let started = Instant::now();
+    let prediction = loop {
+        if let Some(prediction) = engine.poll_prediction() {
+            break prediction;
+        }
+        if started.elapsed() > std::time::Duration::from_secs(5) {
+            report.correction_timeout += 1;
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    };
+    report.correction_probed += 1;
+    tracing::debug!(
+        expected = %pair.text,
+        pinyin = %pair.pinyin,
+        got = ?prediction.words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>(),
+        sentence = ?prediction.sentence,
+        "本地联想结果"
+    );
+    let hit = prediction.words.iter().any(|word| word.text == pair.text);
+    if hit {
+        report.correction_hit += 1;
+    }
+    let top1_right = candidates.first().is_some_and(|c| c.text == pair.text);
+    if hit && !top1_right {
+        report.correction_rescued += 1;
+    }
+    if top1_right && !prediction.words.is_empty() {
+        report.correction_noise += 1;
+    }
 }
 
 /// 整句评测的错误。

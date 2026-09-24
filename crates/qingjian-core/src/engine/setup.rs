@@ -148,6 +148,17 @@ impl Engine {
         self.predictor = predictor;
     }
 
+    /// 开关本地整句联想（配置 `[predict] local`）。模型没加载时开着也不发任务；
+    /// 切换时作废在飞的请求。
+    pub fn set_local_prediction(&mut self, enabled: bool) {
+        if self.local_prediction == enabled {
+            return;
+        }
+        self.local_prediction = enabled;
+        self.local_sentence = None;
+        self.cancel_prediction();
+    }
+
     /// 挂上同步的整句重打分器（Qwen GGUF，查询里当场打分，评测用）。`weight` 是神经分的权重 λ，
     /// `margin` 是参与重排的路径分门槛（nat），`context` 是给模型看的前文字符数；
     /// `None` 用缺省 [`NEURAL_WEIGHT`] / [`NEURAL_MARGIN`] / [`RESCORE_CONTEXT_CHARS`]。
@@ -277,6 +288,21 @@ impl Engine {
     pub fn with_language_model(mut self, model: Box<dyn LanguageModel>) -> Self {
         self.language_model = model;
         self
+    }
+
+    /// 挂上拼音约束的字符级整句提议器（可选，见 [`sentence::CharacterProposer`]）：
+    /// 整句重排池里除词级路径外再补同音字级候选，交给神经重排选。`None` 关掉。
+    pub fn set_character_proposer(
+        &mut self,
+        proposer: Option<Box<dyn sentence::CharacterProposer>>,
+    ) {
+        self.character_proposer = proposer;
+        self.forget_span_cache();
+    }
+
+    /// 整句重排池里有没有接字符级提议器。
+    pub fn has_character_proposer(&self) -> bool {
+        self.character_proposer.is_some()
     }
 
     /// 静态语言模型（没接就是 [`NoLanguageModel`]）：评测工具拿它按 [`crate::sentence::segment_text`] 切汉字文本。

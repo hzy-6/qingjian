@@ -13,6 +13,10 @@ pub struct LocalModelConfig {
     /// 模型重排一条整句候选时分数最多挪动多少（nat）：模型与词库统计的分歧再大也只挪这么多，
     /// 调小重排更保守。`None`（缺省）跟随模型文件自带的建议，再退引擎的缺省值。
     pub max_adjustment: Option<f64>,
+
+    /// 字符级整句提议：用随包的字符 n-gram 模型给整句重排池补同音字级候选（需 `model/char5.fst`）。
+    /// 关掉只走词级路径。
+    pub character_proposals: bool,
 }
 
 impl Default for LocalModelConfig {
@@ -20,6 +24,7 @@ impl Default for LocalModelConfig {
         Self {
             enabled: true,
             max_adjustment: None,
+            character_proposals: true,
         }
     }
 }

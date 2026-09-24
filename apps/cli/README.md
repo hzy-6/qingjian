@@ -34,6 +34,8 @@ cargo run --release -p qingjian-cli                     # 交互模式
 | `--english-mode` | 英文模式（输入法里是 Caps Lock 亮着）：字母不当拼音，候选来自英文词表 |
 | `--predict` | 强制开云联想并等结果打印；密钥来自配置或环境变量 `QINGJIAN_API_KEY` |
 | `--limit N` | 只显示前 N 个候选（缺省 9） |
+| `--qwen <gguf>` | 本地 Qwen 整句重打分（需 `--features qwen` 编译）；`--neural-async` 改走后线程，结果应与同步一致 |
+| `--char-model <fst>` | 字符级整句提议（拼音约束的同音字候选），与词级路径合池后交给 `--qwen` 重排；缺省关 |
 
 ## 输出
 

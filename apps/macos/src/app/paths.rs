@@ -78,3 +78,18 @@ pub fn qwen_path() -> Option<PathBuf> {
                 .and_then(|dir| first_gguf(&dir.join("model")))
         })
 }
+
+/// 字符级整句提议模型（`char5.fst`）：用户目录 `model/` 或包内 `model/`（与 Qwen 同处）里找。
+/// 它是本地字符 n-gram FST，mmap 加载，随 Qwen 模型一起启用，没有就不做字符提议。
+pub fn char_model_path() -> Option<PathBuf> {
+    let name = "char5.fst";
+    user_data_dir()
+        .map(|dir| dir.join("model").join(name))
+        .filter(|path| path.is_file())
+        .or_else(|| {
+            resources_dir()
+                .ok()
+                .map(|dir| dir.join("model").join(name))
+                .filter(|path| path.is_file())
+        })
+}

@@ -63,6 +63,9 @@ pub enum Setting {
     /// `[model] max_adjustment`，弹出菜单，档位见 [`MODEL_CAPS`]。
     LocalModelCap,
 
+    /// `[model] character_proposals`，勾选框：字符级整句提议。
+    LocalModelCharacter,
+
     /// 默认中文标点模式。
     FullWidthPunctuation,
 
@@ -218,6 +221,7 @@ impl Setting {
             Self::OpenRepository => 31,
             Self::LocalModelEnabled => 32,
             Self::LocalModelCap => 48,
+            Self::LocalModelCharacter => 49,
             Self::FullWidthPunctuation => 33,
             Self::SelectPhrase => 34,
             Self::PhraseDraft => 35,
@@ -276,6 +280,7 @@ impl Setting {
             31 => Self::OpenRepository,
             32 => Self::LocalModelEnabled,
             48 => Self::LocalModelCap,
+            49 => Self::LocalModelCharacter,
             33 => Self::FullWidthPunctuation,
             34 => Self::SelectPhrase,
             35 => Self::PhraseDraft,
@@ -319,6 +324,7 @@ mod tests {
             Setting::CloudEnabled,
             Setting::LocalModelEnabled,
             Setting::LocalModelCap,
+            Setting::LocalModelCharacter,
             Setting::BaseUrl,
             Setting::Model,
             Setting::ApiKey,

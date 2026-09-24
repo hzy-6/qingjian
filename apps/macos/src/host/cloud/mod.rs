@@ -67,6 +67,51 @@ impl Host {
         self.monitor.start();
     }
 
+    /// 又敲了一键：重新计时，停键后由定时器调 [`Self::start_prediction`]。
+    /// 每键都发联想请求会让后台批次堆起来，把重排挤到超时（实测 408 条 5.1 秒）。
+    pub fn schedule_prediction(&mut self) {
+        if self.engine.composition().is_empty() {
+            self.cancel_prediction();
+            return;
+        }
+        self.monitor.schedule();
+    }
+
+    /// 防抖到点：重新查一次候选（要完整候选列表，深池/纠错都要），上下文用 Engine
+    /// 里存好的应用前后文（重排那次读的），发一次联想请求。
+    pub fn start_prediction(&mut self) {
+        if self.engine.composition().is_empty() || self.translation.is_some() {
+            self.cancel_prediction();
+            return;
+        }
+        if !self.engine.prediction_active() {
+            return;
+        }
+        if crate::imk::secure_input::enabled() {
+            tracing::debug!("Secure Input 中，不联想");
+            self.cancel_prediction();
+            return;
+        }
+        let Ok(query) = self.engine.query() else {
+            self.cancel_prediction();
+            return;
+        };
+        let surrounding = self.engine.rescoring_surrounding();
+        tracing::debug!(
+            has_context = surrounding.is_some(),
+            pinyin = self.engine.composition().scope(),
+            candidates = query.candidates.items.len(),
+            "联想请求"
+        );
+        match self
+            .engine
+            .request_prediction(surrounding, &query.candidates.items)
+        {
+            Some(_) => self.await_prediction(),
+            None => self.cancel_prediction(),
+        }
+    }
+
     /// 作废联想：不再轮询，丢掉已到的整句。
     pub fn cancel_prediction(&mut self) {
         self.engine.cancel_prediction();

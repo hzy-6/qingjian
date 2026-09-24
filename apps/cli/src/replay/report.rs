@@ -66,6 +66,7 @@ impl Report {
             InputSource::Shortcut | InputSource::Emoji => Some(&mut self.other),
             InputSource::Custom
             | InputSource::Cloud
+            | InputSource::Local
             | InputSource::CloudSentence
             | InputSource::Raw
             | InputSource::Translation => None,

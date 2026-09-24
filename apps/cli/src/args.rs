@@ -115,6 +115,16 @@ pub struct Args {
     #[arg(long)]
     pub qwen: Option<PathBuf>,
 
+    /// 拼音约束的字符级整句提议器：字符 n-gram FST（`tools/corpus/char_lm.py` + `pack_char` 生成，
+    /// 如 data/generated/char5.fst）。与词级路径合池后由同步打分器（`--qwen`）预选；缺省关闭
+    #[arg(long)]
+    pub char_model: Option<PathBuf>,
+
+    /// 开本地联想 / 同音纠错（用 `--qwen` 的本地模型，需配 `--neural-async` 走后台工作线程）。
+    /// 整句评测里会给每句跑一次联想，报告加「本地联想/纠错」一行
+    #[arg(long)]
+    pub local_prediction: bool,
+
     /// 逐键模式：把每个输入当作一键一键敲进去，每个前缀都查一次，打印每键各阶段耗时（性能测试用）
     #[arg(long)]
     pub typing: bool,

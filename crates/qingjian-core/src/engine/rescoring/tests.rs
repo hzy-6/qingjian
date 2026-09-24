@@ -284,11 +284,32 @@ fn a_changed_after_context_discards_the_cached_scores() {
 fn the_shell_context_wins_over_session_history() {
     let mut engine = engine().with_sentence_scorer(Box::new(Prefers("开放")), None, None, Some(4));
     engine.history_mut().record("本会话上屏的历史");
-    assert_eq!(engine.rescoring_context(), "屏的历史");
+    assert_eq!(engine.rescoring_window().0, "屏的历史");
     engine.set_rescoring_context(Some("应用里光标前的文本".to_owned()));
-    assert_eq!(engine.rescoring_context(), "前的文本");
+    assert_eq!(engine.rescoring_window().0, "前的文本");
     engine.set_rescoring_context(None);
-    assert_eq!(engine.rescoring_context(), "屏的历史");
+    assert_eq!(engine.rescoring_window().0, "屏的历史");
+    // 没有后文：预算全给前文
+    engine.set_rescoring_surrounding(Some("应用里光标前的文本".to_owned()), None);
+    assert_eq!(
+        engine.rescoring_window(),
+        ("前的文本".to_owned(), String::new())
+    );
+    // 两侧都有：预算对半，前文取尾部、后文取头部
+    engine.set_rescoring_surrounding(
+        Some("一二三四五六七八九十".to_owned()),
+        Some("甲乙丙丁戊".to_owned()),
+    );
+    assert_eq!(
+        engine.rescoring_window(),
+        ("九十".to_owned(), "甲乙".to_owned())
+    );
+    // 短的一侧用不完的让给另一侧:前文只有 1 字,后文拿到其余 3 字
+    engine.set_rescoring_surrounding(Some("一".to_owned()), Some("甲乙丙丁戊".to_owned()));
+    assert_eq!(
+        engine.rescoring_window(),
+        ("一".to_owned(), "甲乙丙".to_owned())
+    );
 }
 
 #[test]
@@ -701,4 +722,70 @@ fn a_legacy_scorer_ignores_the_after_context_on_the_async_path() {
     let mut paths = vec![path("开饭", -10.0), path("开放", -11.0)];
     engine.rescore_paths(&mut paths);
     assert_eq!(texts(&paths), ["开放", "开饭"]);
+}
+
+#[test]
+fn predict_jobs_land_in_their_own_channel_and_rescore_is_scored_first() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<String>>::new()));
+    let worker = RescoreWorker::spawn(Box::new(RecordsBatches(seen.clone())));
+    worker.submit(1, "前文".into(), String::new(), vec!["重排".into()]);
+    worker.submit_predict(2, "前文".into(), String::new(), vec!["联想".into()]);
+    let started = Instant::now();
+    let (mut rescore, mut predict) = (None, None);
+    while rescore.is_none() || predict.is_none() {
+        assert!(started.elapsed() < Duration::from_secs(5), "后台没回结果");
+        if rescore.is_none() {
+            rescore = worker.poll();
+        }
+        if predict.is_none() {
+            predict = worker.poll_predict();
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    // 重排与联想的结果互不串渠道,序号原样带回
+    assert_eq!(rescore.unwrap().sequence, 1);
+    assert_eq!(predict.unwrap().sequence, 2);
+    // 重排永远先算
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![vec!["重排".to_owned()], vec!["联想".to_owned()]]
+    );
+}
+
+#[test]
+fn only_the_newest_predict_job_is_scored() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<String>>::new()));
+    let worker = RescoreWorker::spawn(Box::new(RecordsBatches(seen.clone())));
+    worker.submit_predict(1, "前文".into(), String::new(), vec!["旧".into()]);
+    worker.submit_predict(2, "前文".into(), String::new(), vec!["新".into()]);
+    let started = Instant::now();
+    let scored = loop {
+        if let Some(scored) = worker.poll_predict() {
+            break scored;
+        }
+        assert!(started.elapsed() < Duration::from_secs(5), "后台没回结果");
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    // 同类排队只算最新的一条,旧的连模型都不碰
+    assert_eq!(scored.sequence, 2);
+    assert_eq!(scored.texts, vec!["新".to_owned()]);
+    std::thread::sleep(Duration::from_millis(30));
+    assert_eq!(*seen.lock().unwrap(), vec![vec!["新".to_owned()]]);
+}
+
+#[test]
+fn wanted_batches_are_capped_and_keep_the_newest() {
+    let mut cache = NeuralCache::default();
+    for index in 0..50 {
+        cache.want(&format!("文本{index}"));
+    }
+    // 一次最多 32 条：整段组句攒到几百条时不能全送（后台忙几秒，壳等 2 秒就放弃了）
+    let batch = cache.take_wanted(RESCORE_BATCH_MAX);
+    assert_eq!(batch.len(), RESCORE_BATCH_MAX);
+    // 取最近攒的：当前查询的路径最后压入，一定在这批里
+    assert!(batch.contains(&"文本49".to_owned()));
+    assert!(!batch.contains(&"文本0".to_owned()));
+    // 剩下的留在表里下一批再送
+    assert_eq!(cache.take_wanted(RESCORE_BATCH_MAX).len(), 18);
+    assert!(!cache.has_wanted());
 }

@@ -12,6 +12,7 @@
 //!
 //! 格子查词是最贵的一步，结果放进 [`SpanCache`]：敲键是增量的，每一键只有以它结尾的几个格子是新的。
 
+mod character_proposer;
 mod context;
 mod conversion;
 mod interpolation;
@@ -24,6 +25,7 @@ mod text_segment;
 mod user_ngram;
 mod viterbi;
 
+pub use character_proposer::CharacterProposer;
 pub use context::Context;
 pub use conversion::Conversion;
 pub use interpolation::Interpolation;

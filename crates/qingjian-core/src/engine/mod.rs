@@ -123,6 +123,9 @@ pub struct Engine {
     /// 整句转换的语言模型，缺省为 [`NoLanguageModel`]（退化成一元词频）。
     language_model: Box<dyn LanguageModel>,
 
+    /// 拼音约束的字符级整句提议器（可选）：给整句重排池补同音字级候选，见 [`sentence::CharacterProposer`]。
+    character_proposer: Option<Box<dyn sentence::CharacterProposer>>,
+
     /// 整句路径的同步神经重打分器（Qwen GGUF，查询里当场打分；CLI 评测用）。
     sentence_scorer: Option<Box<dyn SentenceScorer>>,
 
@@ -238,6 +241,12 @@ pub struct Engine {
     /// 最近一次联想请求的序号，0 表示还没发过。
     prediction_sequence: u64,
 
+    /// 本地整句联想开着（配置 `[predict] local`；模型加载后才真正发任务）。
+    local_prediction: bool,
+
+    /// 在飞的本地整句联想：提议已送后台打分，结果按序号配对。
+    local_sentence: Option<prediction::LocalSentenceRequest>,
+
     /// 最近一次联想请求的种类：只有组句联想的结果要按拼音校验。
     last_prediction_kind: PredictionKind,
 
@@ -334,6 +343,11 @@ const MAX_CANDIDATES: usize = 500;
 /// CLI `--neural-paths` 可改——上探 16 要连延迟红线一起看。
 pub const RESCORE_PATHS: usize = 8;
 
+/// 一次重排送去后台的文本上限。整段组句里「待打分」会累积到几百条（每个键的前缀路径都算一次），
+/// 一次全送会让后台线程忙几秒、把这一轮重排挤过壳的等待窗口；取最近攒的最多这么多条。
+/// 当前查询的路径最后压入，一定在这批里。
+pub const RESCORE_BATCH_MAX: usize = 32;
+
 /// 两音节以下的输入不调神经重排：它们基本是单词，最终由词级候选排序，
 /// 整句路径即使打分也会因“整段本来就是一个词”而去重。跳过这批无效前向可降低真实输入功耗。
 const MIN_NEURAL_SYLLABLES: usize = 3;
@@ -360,9 +374,10 @@ pub const NEURAL_MAX_ADJUSTMENT: f64 = 12.0;
 /// 壳里是停顿后异步重排，每键不受影响），回放与 8 逐条一致。5 会漏掉词库新补词的翻案。
 pub const NEURAL_MARGIN: f64 = 9.0;
 
-/// 重打分给模型看的前文：本次会话最近上屏的这么多个字符。128：Qwen 接管重打分后回放整句 +0.4 个点
-/// （见 docs/notes/qwen-rescoring.md），壳里读应用光标前文的长度也跟着它走（`RESCORE_LOOKBACK`）。
-pub const RESCORE_CONTEXT_CHARS: usize = 128;
+/// 重打分给模型看的上下文**总预算**：自适应分给光标前后——两侧都有文本对半（200 → 前 100 + 后 100），
+/// 只有一侧全给那一侧，短侧用不完的让给对侧（[`split_window`]）。200：Qwen 接管重打分后回放整句 +0.4 个点
+/// （见 docs/notes/qwen-rescoring.md），壳里读应用光标前后文的长度也跟着它走（`RESCORE_LOOKBACK`）。
+pub const RESCORE_CONTEXT_CHARS: usize = 200;
 
 /// 个人证据保护闸的倍率：神经要翻掉一条老排名靠前的路径时，两边的神经修正差必须不小于
 /// `gate × 守成路径的个人证据优势`（路径分减静态分——个人 n-gram、用户加分、代价那部分）。
@@ -388,6 +403,7 @@ impl Engine {
             chinese_first: true,
             predictor: Box::new(NoPredictor),
             language_model: Box::new(NoLanguageModel),
+            character_proposer: None,
             sentence_scorer: None,
             rescorer: None,
             neural_cache: std::cell::RefCell::new(rescoring::NeuralCache::default()),
@@ -426,6 +442,8 @@ impl Engine {
             recording: Vec::new(),
             history: InputHistory::default(),
             prediction_sequence: 0,
+            local_prediction: false,
+            local_sentence: None,
             last_prediction_kind: PredictionKind::Compose,
             last_question_guess: String::new(),
             chain: CommitChain::default(),

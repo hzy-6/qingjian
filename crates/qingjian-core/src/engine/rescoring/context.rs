@@ -1,5 +1,24 @@
 //! 给神经重排模型选上下文:按句界结构化截取,不做机械的「最后 N 字」。
 
+/// 自适应窗口：总预算 `budget`，按两侧有无文本动态分——
+/// 只有前文全给前文；只有后文全给后文；两侧都有各拿一半，短的一侧用不完的让给另一侧。
+/// 返回 (前文字符数, 后文字符数)；前文取尾部（最近的话），后文取头部，由调用方裁。
+pub fn split_window(before: &str, after: &str, budget: usize) -> (usize, usize) {
+    let before_chars = before.chars().count();
+    let after_chars = after.chars().count();
+    if after_chars == 0 {
+        return (before_chars.min(budget), 0);
+    }
+    if before_chars == 0 {
+        return (0, after_chars.min(budget));
+    }
+    let left = before_chars.min(budget / 2);
+    let right = after_chars.min(budget - left);
+    // 右侧没用完的预算回让给左侧(前文是主要证据)
+    let left = left + (before_chars - left).min(budget - left - right);
+    (left, right)
+}
+
 /// 句界字符:这些之后开新句。用于把光标前文切成句段。
 const SENTENCE_BOUNDARIES: [char; 8] = ['。', '！', '？', '!', '?', ';', '；', '\n'];
 
@@ -84,6 +103,30 @@ mod tests {
         assert_eq!(select_context("", 64), "");
         assert_eq!(select_context("你好", 64), "你好");
         assert_eq!(select_context("你好", 0), "");
+    }
+
+    #[test]
+    fn split_window_adapts_to_what_each_side_has() {
+        // 两侧都有：对半
+        assert_eq!(
+            split_window(&"前".repeat(150), &"后".repeat(150), 200),
+            (100, 100)
+        );
+        // 只有一侧：全给那一侧，另一侧为零
+        assert_eq!(split_window(&"前".repeat(150), "", 200), (150, 0));
+        assert_eq!(split_window(&"前".repeat(300), "", 200), (200, 0));
+        assert_eq!(split_window("", &"后".repeat(90), 200), (0, 90));
+        // 短的一侧用不完，剩下的让给对侧
+        assert_eq!(
+            split_window(&"前".repeat(30), &"后".repeat(300), 200),
+            (30, 170)
+        );
+        assert_eq!(
+            split_window(&"前".repeat(300), &"后".repeat(10), 200),
+            (190, 10)
+        );
+        // 两侧都空
+        assert_eq!(split_window("", "", 200), (0, 0));
     }
 
     #[test]

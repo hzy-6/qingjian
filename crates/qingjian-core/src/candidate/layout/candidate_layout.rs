@@ -68,7 +68,9 @@ impl CandidateLayout {
             {
                 continue;
             }
-            word.kind = CandidateKind::Cloud;
+            if word.kind != CandidateKind::Local {
+                word.kind = CandidateKind::Cloud;
+            }
             self.cloud.push(word);
         }
         self.cloud.len()

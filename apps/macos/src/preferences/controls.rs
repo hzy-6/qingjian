@@ -83,7 +83,22 @@ pub(super) fn note_full(layout: &mut Layout, mtm: MainThreadMarker, text: &str) 
     note_at(layout, mtm, text, PAGE_PADDING, layout.inner_width());
 }
 
-fn note_at(layout: &mut Layout, mtm: MainThreadMarker, text: &str, x: f64, width: f64) {
+/// 同 [`note`]，但把标签返回给调用方，供以后按状态改文字（如模型文件在不在）。
+pub(super) fn note_owned(
+    layout: &mut Layout,
+    mtm: MainThreadMarker,
+    text: &str,
+) -> Retained<NSTextField> {
+    note_at(layout, mtm, text, CONTROL_X, layout.control_width())
+}
+
+fn note_at(
+    layout: &mut Layout,
+    mtm: MainThreadMarker,
+    text: &str,
+    x: f64,
+    width: f64,
+) -> Retained<NSTextField> {
     let label = small_label(mtm, text);
     label.setUsesSingleLineMode(false);
     if let Some(cell) = label.cell() {
@@ -94,6 +109,7 @@ fn note_at(layout: &mut Layout, mtm: MainThreadMarker, text: &str, x: f64, width
     let height = NOTE_HEIGHT * lines;
     layout.place(&label, x, width, height);
     layout.next_row(height);
+    label
 }
 
 /// 勾选框独占一行，从标题列起始处摆（勾选框自带标题，不用左列标题）。

@@ -50,6 +50,21 @@ pub struct Report {
 
     /// 静态首选就是原句的句子数(翻坏的分母)。
     pub static_top1: usize,
+
+    /// 纠错探针：发出本地联想请求并拿到结果的句子数（分母，没开本地联想时为 0）。
+    pub correction_probed: usize,
+
+    /// 纠错槽里含原句的句子数。
+    pub correction_hit: usize,
+
+    /// 首选不是原句、但纠错槽把它救回来的句子数。
+    pub correction_rescued: usize,
+
+    /// 首选本来就是原句、纠错槽却有别的词的句子数（噪声 / 误纠）。
+    pub correction_noise: usize,
+
+    /// 等本地联想超时的句子数。
+    pub correction_timeout: usize,
 }
 
 impl Report {
@@ -110,6 +125,24 @@ impl fmt::Display for Report {
         }
         if self.unparsable > 0 {
             writeln!(f, "其中 {} 条拼音切不动", self.unparsable)?;
+        }
+        if self.correction_probed > 0 {
+            writeln!(
+                f,
+                "本地联想/纠错 {:>6}（{} / {}）  救回 {:>6}  首选已对却有纠错 {:>6}  超时 {}",
+                percent(self.correction_hit, self.correction_probed),
+                self.correction_hit,
+                self.correction_probed,
+                percent(
+                    self.correction_rescued,
+                    self.correction_probed - self.static_top1.min(self.correction_probed)
+                ),
+                percent(
+                    self.correction_noise,
+                    self.static_top1.min(self.correction_probed)
+                ),
+                self.correction_timeout,
+            )?;
         }
         if self.untranscribable > 0 {
             writeln!(

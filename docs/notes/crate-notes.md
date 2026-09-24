@@ -22,7 +22,15 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 - 整句候选的跨切分仲裁：parser 首切是「音节少、前面音节长」的贪心结果（`bange` → `bang e`），语言模型时常更认可另一支（`ban ge` → 半个小时，整句评测上从 67.6% 提到 69.8%）。
   `plain_sentence` 对前 `SENTENCE_SEGMENTATIONS` = 4 个切分各做一次静态整句转换（`convert_sentence_raw`，不重排），赢家再单独做神经重排（各切分都重排太贵）。
   仲裁三道闸：两边音节全完整且音节数一样（含简拼 / 前缀的切分分数没法比）、对手要赢出 `SENTENCE_ARBITRATION_MARGIN` = 2.5 nat（个人 n-gram / 敲错折扣喂出来的小分差不作数）、
-  首切的最优路径没走敲错 / 模糊边（`nineng` 按 `nin eng` + 个人敲错表是用户自己的读法，不让干净切分压掉）。回归测试在 `engine/tests/lookup.rs`。
+  首切的最优路径没走敲错 / 模糊边（`nineng` 按 `nin eng` + 个人敲错表是用户自己的读法，不让干净切分压掉）。
+  末闸有一个例外：对手是整段输入的那一个词库词、且按原样读（`chuanganqi` → 传感器；首切的 `chuang an qi` 靠 an→kan 敲错边读出 创刊起）时，
+  整词是「用户把整个词拼出来了」的硬信号，允许它按分数翻掉改了原样的首切，免得最后给首切套一个干净但荒唐的 床安琪 压住 传感器。回归测试在 `engine/tests/lookup.rs`。
+- 字符级整句提议器（`sentence::CharacterProposer`，实现在 `qingjian-lm` 的 `CharNgramModel`，可 mmap 的字符 n-gram FST）：
+  对胜出切分的每个音节取词库前 `CHARACTER_CHOICES`=50 个同音字，用字 n-gram 按拼音约束解出整句字串，与词级前 8 条路径合池，
+  再由重排器预选回 `neural_paths`（缺省 8）条（旧静态首选钉住）。合池在**静态切分仲裁之后、神经重排之前**、只对胜出切分做一次（每切分都做会把 139 句 P50 从 186ms 拉到 747ms）。
+  同步打分器当场打原始分；异步打分器分未到时先整池留着交给 `rescore_paths` want，分到齐后在 `preselect_character_paths` 按缓存原始分预选（同步 / 异步结果一致）。
+  CLI 用 `--char-model data/generated/char5.fst` 开；macOS 壳在 `[model] enabled` 下从用户目录 / 包内 `model/char5.fst` 加载。
+  实测（Qwen 2B + 成语 + IT）：139 集首选 93.5%→95.7%、oracle 95.0%→97.1%；895 混域集首选 61.9%→68.3%、oracle 68.5%→79.5%、字准确率 91.0%→92.9%。
 - 中英混输的英文词位置：`Engine::set_chinese_first`（配置 `[general] chinese_first`，缺省开；CLI 不读配置，`--chinese-first` 才开）关着时拼音不像话的输入英文排第一
   （`extras::insert_english`，用户老选中文词时仍让中文在前），开着时整句先插、英文词紧随其后排第二（`query_inner` 里两步的先后按开关掉转）；句末英文词并入整句（`EnglishTail`）不受它影响。
   早期缺省关是回放定的（9241 词 / 269 条英文上屏：缺省开英文首选 82.5% → 7.1%），后来改成缺省开；`leis` / `hz` / `bus` / `key` 四个不像拼音的输入两种排法都有回归测试钉着（`engine/tests/english.rs`）。
@@ -57,7 +65,7 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 ## crates/qingjian-predict
 
 - `CloudPredictor`：`Predictor` trait 的网络实现（async-openai，OpenAI 兼容接口，默认 DeepSeek），后台线程防抖 / 缓存 / 超时，`submit` / `poll` 非阻塞。
-  `PredictConfig` 是配置的 `[predict]` 分节。只在组句中联想，一次请求给云端词（容错校验后补进候选第一页末尾 `[predict] slots` 格，缺省 2，不预留不占位，
+  `PredictConfig` 是配置的 `[predict]` 分节（`local` 是本地整句联想开关，缺省开，实现在 Core）。只在组句中联想，一次请求给云端词（容错校验后补进候选第一页末尾 `[predict] slots` 格，缺省 2，不预留不占位，
   前面的本地候选不挪；排布在 Core `CandidateLayout`）和整句补全（preedit 右侧，Tab）；上屏后不联想，本地历史不进请求。
 - `CloudGlossFiller`：释义兜底（Core `GlossFiller` trait，与 Predictor 分开的线程与通道，攒 1.5 秒 / 8 个词发一次，问过不再问）：
   随包释义表没有的词库词 / 云端词上屏后入队，结果壳每秒 `Engine::poll_glosses` 经 `Translator::learn` 写进 `qingjian-translate::PersonalGlossary`
@@ -78,9 +86,13 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 给「前文 + 整句」按 BPE token 累加 log 概率，Metal 加速，双向上下文与修正建议（`max_adjustment` 30 nat）。
 每条候选拼上前文各自成一个序列、一次 decode 打一批（超过 31 条或 480 token 切批），打完 `clear_kv_cache` 整体重算——
 Qwen3.5 是注意力 + SSM 混合架构，`seq_cp` / 中间回卷都不可用（坑与调参记录见 `docs/notes/qwen-rescoring.md`）。
+**跨长度比神经分要归一**：log 概率逐字累加，长短不一的候选直接比会让长候选永远吃亏（深池词按每字平均分、纠错变体与等长基线比，见 `split_local_scores`）。
 空前文退 BOS/EOS（qwen35 没设 `dec_start_token_id`，是 -1）。壳的装配只认 GGUF（用户目录 > 包内,`apps/macos` 的 `host/model` 与 `paths::qwen_path`）；
-CLI `--qwen <gguf>`（要 `--features qwen` 编译,参数族 `--neural-*`）。Engine 侧的新缺省:`NEURAL_GATE` = 2（个人证据保护闸）、
-`RESCORE_CONTEXT_CHARS` = 128；一两个音节的输入由词级候选决定，不唤醒 2B，避免单词去重前的无效推理，见 `docs/notes/qwen-rescoring.md`。
+CLI `--qwen <gguf>`（要 `--features qwen` 编译,参数族 `--neural-*`）、本地联想 `--local-prediction`（要配 `--neural-async`，
+整句评测报告加「本地联想/纠错」一行）。`RescoreWorker` 后台线程在 `Drop` 里先关任务通道再 `join`——
+不等它退完就析构，进程退出时 ggml 会撞 Metal 资源集断言。Engine 侧的新缺省:`NEURAL_GATE` = 2（个人证据保护闸）、
+`RESCORE_CONTEXT_CHARS` = 200：光标前后的**总预算**，按 `split_window` 自适应分（两侧都有对半 100/100，
+只有一侧全给、短侧用不完的让给对侧）；前文按句界结构化装填、后文取头部（`rescoring_window`）。一两个音节的输入由词级候选决定，不唤醒 2B，避免单词去重前的无效推理，见 `docs/notes/qwen-rescoring.md`。
 Viterbi 侧先取 16 条并按分歧位置组合做多样化 shortlist，最终仍只给 2B 8 条，不增加神经前向数。
 
 ## crates/qingjian-lm
@@ -89,6 +101,7 @@ Viterbi 侧先取 16 条并按分歧位置组合做多样化 shortlist，最终�
 （没有这两个文件就退化为一元词频整句）。数据由 `tools/corpus/parquet_to_text.py`（uv 脚本，HF parquet → 简体纯文本）加
 `cargo run --release -p qingjian-dict-convert -- bigram --phrases assets/lexicon/phrases.tsv --phrases assets/lexicon/domain_words.tsv --brand assets/lexicon/brand.tsv --brand assets/lexicon/mixed_words.tsv data/corpus/*.txt` 生成；语料在 `data/corpus/`（gitignore）。
 短语层不当 token 统计（分词时摘掉、统计完按成分合成一元 / 二元，短语得分等于原来两个词的路径，见 `bigram.rs` 模块注释），品牌词按给定次数写进一元与句首二元。
+`LanguageModel::successors` 枚举前词的后继（CSR 段切片按计数排序截断），给本地联想出接续提议；trait 缺省空实现，个人 n-gram（`UserNgram::successors`）同名方法与它合并。
 
 ## crates/qingjian-platform
 
@@ -142,6 +155,17 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 - 本地整句模型：`bundle.sh` 把 `data/model/`（或 `QINGJIAN_MODEL_DIR`）三件套打进 `Resources/model/`，用户目录 `model/` 优先；`host/model/mod.rs` 在后台线程加载并预热（首次 Metal 编译）后
   `set_async_sentence_scorer` 接上，`refresh` 每键先读应用光标前 64 字给 Engine 当前文、查询后 `schedule_rescoring`，`RescoreMonitor` 停键 80 ms 请求、20 ms 轮询，
   结果到了重查一次只重画当前页（翻过页 / 动过高亮不动）；「云服务」页有开关（`[model] enabled`）。
+- 本地整句联想（`[predict] local`，缺省开，要与 `[model] enabled` 同时开）：Core `engine/prediction` 里实现，与云联想共用请求 / 序号 / Tab 接受 / 词槽管道。
+  三类提议：①接续提议 = 静态 LM 与个人 n-gram 的后继合并（`LanguageModel::successors` + `UserNgram::successors`，个人一次计数折 8 次静态），
+  胜过基线（不带续写的 guess）才出整句；②深池词 = 候选列表第一页（9 条）之外被静态排序埋没的词，
+  与参照比「每字平均分」（log 概率逐字累加，不归一的活长候选天然吃亏）才榜进词槽（条数随 `[predict] slots`）；
+  ③纠错变体 = 最优转换路径（2–6 个词）的每个词换同音词（`lookup_exact_all`），静态整句分预筛后取前 24 条；
+  变体与 guess 等长，与**基线 guess** 比（不是与长短不一的参照比），高出 `CORRECTION_MARGIN`(2.0 nat) 才榜进词槽；
+  本机给的联想词走 `CandidateKind::Local`（行为同 `Cloud`，候选窗**不画云朵**，免得误以为数据外传）。
+  2B 只排序不生成：`RescoreWorker` 新增 `submit_predict` 任务类型，重排优先、同类只算最新，结果分渠道（`poll` / `poll_predict`）互不抢。
+  壳侧有 250ms 防抖（`PredictMonitor::schedule` → `Host::start_prediction`），一次预测批次约 30 条——
+  此前每键一发、批次上百条，实测把重排挤到超时（`texts=408 ms=5147`）。
+  门控：音节 < 3 不发（与短词门控同线）；上下文前后各 100 字（`Engine::prediction_context_window`，壳按它读应用文本）；打分分段与阈值在 `split_local_scores`。
 - 端到端验证可用 `osascript` 的 System Events 往 TextEdit 发按键再读回文本（终端需要辅助功能权限；输入法得在中文模式）。
 
 ## assets

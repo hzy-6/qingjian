@@ -19,7 +19,7 @@ use clap::Parser;
 use qingjian_core::{EmojiTable, Engine, FuzzyRules, Language};
 use qingjian_dictionary::{Dictionary, WordList};
 use qingjian_learning::FrequencyLearner;
-use qingjian_lm::BigramModel;
+use qingjian_lm::{BigramModel, CharNgramModel};
 use qingjian_platform::Config;
 use qingjian_predict::CloudPredictor;
 use qingjian_translate::Glossary;
@@ -57,6 +57,7 @@ fn run() -> Result<(), CliError> {
             args.eval_save.as_deref(),
             args.eval_jsonl.as_deref(),
             args.misses,
+            args.local_prediction,
         )?;
         print!("{report}");
         return Ok(());
@@ -213,6 +214,15 @@ fn build_engine(args: &Args) -> Result<Engine, CliError> {
         );
         engine = engine.with_language_model(Box::new(model));
     }
+    if let Some(path) = &args.char_model {
+        let started = Instant::now();
+        let model = CharNgramModel::from_path(path)?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "字符级整句提议已启用"
+        );
+        engine.set_character_proposer(Some(Box::new(model)));
+    }
     if let Some(scorer) = neural_scorer(args)? {
         let started = Instant::now();
         tracing::info!(
@@ -239,6 +249,13 @@ fn build_engine(args: &Args) -> Result<Engine, CliError> {
         if let Some(paths) = args.neural_paths {
             engine.set_neural_paths(paths);
         }
+    }
+    if args.local_prediction {
+        // 联想打分走后台工作线程（`submit_predict`），同步打分器没有工作线程，开了也不会发
+        if !args.neural_async {
+            tracing::warn!("--local-prediction 需要 --neural-async，否则本地联想不会发出");
+        }
+        engine.set_local_prediction(true);
     }
     let config_path = args
         .config

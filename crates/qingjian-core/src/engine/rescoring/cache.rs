@@ -66,7 +66,14 @@ impl NeuralCache {
     }
 
     /// 取走等着送去后台的文本。
-    pub fn take_wanted(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.wanted)
+    /// 取一批要打分的文本，最多 `limit` 条，取**最近攒的**。
+    /// 整段组句里「待打分」会累积到几百条（每个键的前缀路径都算一次），一次全送会让后台线程忙几秒，
+    /// 把这一轮重排挤过壳的等待窗口（实测 408 条 4.5 秒，壳等 2 秒就放弃了）。
+    /// 剩下的留在表里下一批再送；当前查询的路径是最后压入的，一定在这批里。
+    pub fn take_wanted(&mut self, limit: usize) -> Vec<String> {
+        if self.wanted.len() <= limit {
+            return std::mem::take(&mut self.wanted);
+        }
+        self.wanted.split_off(self.wanted.len() - limit)
     }
 }

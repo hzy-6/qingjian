@@ -20,6 +20,9 @@ pub enum LmError {
     #[error("language model file: {0}")]
     Container(#[from] qingjian_format::FormatError),
 
+    #[error("character n-gram FST: {0}")]
+    Fst(#[from] fst::Error),
+
     #[error("corrupt language model file: {0}")]
     Corrupt(&'static str),
 }

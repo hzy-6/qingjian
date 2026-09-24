@@ -92,7 +92,26 @@ impl Host {
     pub(super) fn unload_local_model(&mut self) {
         self.model_loader = None;
         self.engine.set_async_sentence_scorer(None);
+        self.engine.set_character_proposer(None);
         self.rescore.stop();
+    }
+
+    /// 加载字符级整句提议模型（`char5.fst`，mmap，很快）：与 Qwen 重排一起启用，
+    /// 重排池里除词级路径外再补同音字级候选。没有文件就跳过。
+    pub(super) fn load_character_model(&mut self) {
+        let Some(path) = paths::char_model_path() else {
+            tracing::info!("没有字符级整句提议模型，不用");
+            return;
+        };
+        match CharNgramModel::from_path(&path) {
+            Ok(model) => {
+                tracing::info!(path = %path.display(), "字符级整句提议已加载");
+                self.engine.set_character_proposer(Some(Box::new(model)));
+            }
+            Err(error) => {
+                tracing::warn!(%error, path = %path.display(), "字符级整句提议加载失败")
+            }
+        }
     }
 
     /// 每次查询之后：有整句路径等着打分就起防抖计时。

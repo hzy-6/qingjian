@@ -215,6 +215,7 @@ pub fn parse_reply(content: &str, request: &PredictionRequest) -> Reply {
             text,
             syllables,
             reading: None,
+            local: false,
         });
         if reply.words.len() >= request.max_items {
             break;
@@ -242,6 +243,7 @@ fn parse_answers(answers: Vec<RawWord>, max_items: usize) -> Reply {
             text,
             syllables: Vec::new(),
             reading: (!reading.is_empty()).then_some(reading),
+            local: false,
         });
         if reply.words.len() >= max_items {
             break;

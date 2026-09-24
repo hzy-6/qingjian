@@ -77,11 +77,19 @@ impl Host {
         if self.applied_model.as_ref() != Some(&config.model) {
             if config.model.enabled {
                 self.load_local_model();
+                if config.model.character_proposals {
+                    self.load_character_model();
+                } else {
+                    self.engine.set_character_proposer(None);
+                }
             } else {
                 self.unload_local_model();
             }
             self.applied_model = Some(config.model.clone());
         }
+        // 本地整句联想：要 `[predict] local` 和模型开关同时开（共用那个模型实例）。幂等，每次都设
+        self.engine
+            .set_local_prediction(config.predict.local && config.model.enabled);
         let cloud_active = self.engine.prediction_enabled();
         self.indicator.set_cloud(cloud_active);
         self.indicator.update();

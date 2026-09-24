@@ -196,6 +196,8 @@ disabled = []
 enabled = true
 # 模型重排一条整句候选时分数最多挪动多少（nat）：调小重排更保守。不写（缺省）跟随模型文件自带的建议，再退引擎缺省 8
 # max_adjustment = 8.0
+# 字符级整句提议：用随包的字符 n-gram 模型给整句重排补同音字级候选（需 model/char5.fst）；关掉只走词级路径
+character_proposals = true
 
 [predict]
 # 云联想：把光标附近的文本发到下面的接口，让模型补全整句 / 联想下文。默认关闭。
@@ -219,6 +221,9 @@ lookahead = 32
 slots = 2
 # 组句中除了词候选还要不要整句补全（preedit 右侧，Tab 接受）
 sentence = true
+# 本地整句联想：用随包的本地模型在本机推断整句接续（同样挂在 preedit 右侧，Tab 接受），全程离线。
+# 需要上面的本地整句模型开着；音节不超过两个的短输入不唤醒模型，功耗不回退
+local = true
 
 "#
 );

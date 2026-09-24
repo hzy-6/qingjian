@@ -198,6 +198,20 @@ impl UserNgram {
         self.pairs.values().map(HashMap::len).sum()
     }
 
+    /// 枚举 `previous` 的后继词（按次数从高到低），给本地联想出接续提议用。
+    /// 用户自己的习惯优先级很高，静态模型不认识的前词这里也能接上。
+    pub fn successors(&self, previous: &str) -> Vec<(String, u32)> {
+        let Some(next) = self.pairs.get(previous) else {
+            return Vec::new();
+        };
+        let mut rows: Vec<(String, u32)> = next
+            .iter()
+            .map(|(word, count)| (word.clone(), *count))
+            .collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        rows
+    }
+
     /// 不同的 (前二词, 前词, 后词) 条数。
     pub fn triple_count(&self) -> usize {
         self.triples
@@ -452,6 +466,19 @@ fn halve(next: &HashMap<String, u32>) -> HashMap<String, u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn successors_are_count_ordered_and_unknown_previous_is_empty() {
+        let mut model = UserNgram::default();
+        model.record(Context::after("我"), "想");
+        model.record(Context::after("我"), "去");
+        model.record(Context::after("我"), "想");
+        assert_eq!(
+            model.successors("我"),
+            vec![("想".to_owned(), 2), ("去".to_owned(), 1)]
+        );
+        assert!(model.successors("没记过").is_empty());
+    }
 
     #[test]
     fn counts_transitions_and_round_trips_through_tsv() {

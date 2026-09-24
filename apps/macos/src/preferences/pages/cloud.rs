@@ -2,12 +2,12 @@
 
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSButton, NSPopUpButton, NSSecureTextField, NSTextField};
+use objc2_app_kit::{NSButton, NSColor, NSPopUpButton, NSSecureTextField, NSTextField};
 use objc2_foundation::NSString;
 use qingjian_platform::Config;
 
 use crate::preferences::controls::{
-    button, checkbox, note, row_checkbox, row_control, row_popup, secure_field, select,
+    button, checkbox, note, note_owned, row_checkbox, row_control, row_popup, secure_field, select,
     set_checked, text_field,
 };
 use crate::preferences::layout::{Layout, PAGE_PADDING, ROW_HEIGHT};
@@ -20,6 +20,12 @@ const MAX_CLOUD_SLOTS: usize = 4;
 /// 「模型修正上限」菜单各档的标题，与 [`MODEL_CAPS`] 一一对应。
 const MODEL_CAP_TITLES: [&str; MODEL_CAPS.len()] =
     ["跟随模型", "保守（2）", "适中（4）", "宽松（8）"];
+
+/// 字符级整句提议的说明小字：模型文件在时与不在时各一句（缺文件时提示怎么补）。
+/// 两条都在布局时按较长的那条占位，切换到较短的一条时不会截断。
+const CHARACTER_NOTE_OK: &str =
+    "用字符 n-gram 模型给重排池补同音字级候选（会议时 → 会议室 这类）。";
+const CHARACTER_NOTE_MISSING: &str = "未找到字符模型文件 char5.fst：把它放进用户数据目录的 model/（或重新打包时带上），这一项才会生效。";
 
 /// 配置值对应菜单第几档：正好在档上用那档，手改出的中间值挑最近的一档显示（距离相同取更保守的小档；
 /// 只在用户再选时才落盘）。
@@ -45,6 +51,12 @@ pub struct CloudPage {
 
     /// 本地整句模型的修正上限档位。
     model_cap: Retained<NSPopUpButton>,
+
+    /// 字符级整句提议开关。
+    character: Retained<NSButton>,
+
+    /// 字符级整句提议下方的说明小字，会按模型文件在不在改文字。
+    character_note: Retained<NSTextField>,
 
     /// 云联想开关。
     enabled: Retained<NSButton>,
@@ -88,6 +100,10 @@ impl CloudPage {
             mtm,
             "模型重排一次最多把一条整句候选挪多少分：调小更稳（重排幅度受限），调大更信模型。缺省跟随模型文件自带的建议。",
         );
+        let character = checkbox(mtm, "字符级整句提议", Setting::LocalModelCharacter, target);
+        row_checkbox(layout, &character);
+        // 先按「缺文件」那条占位（较长），sync 时再换成实际提示
+        let character_note = note_owned(layout, mtm, CHARACTER_NOTE_MISSING);
         let enabled = checkbox(mtm, "启用云联想", Setting::CloudEnabled, target);
         row_checkbox(layout, &enabled);
         note(
@@ -136,6 +152,8 @@ impl CloudPage {
         Self {
             local_model,
             model_cap,
+            character,
+            character_note,
             enabled,
             slots,
             base_url,
@@ -147,7 +165,14 @@ impl CloudPage {
 
     /// `key_present` 是密钥已经有了（环境或配置里）；密钥框永远不回显值，只换占位文字。
     /// `model_present` 是包里或用户目录里有模型文件，没有就把本地模型的勾选与上限档位灰掉；云联想关着时它下面的项全灰。
-    pub fn sync(&self, config: &Config, key_present: bool, model_present: bool) {
+    /// `char_present` 是字符级整句提议模型（`char5.fst`）在不在，没有就把那一项灰掉。
+    pub fn sync(
+        &self,
+        config: &Config,
+        key_present: bool,
+        model_present: bool,
+        char_present: bool,
+    ) {
         set_checked(&self.local_model, config.model.enabled && model_present);
         self.local_model.setEnabled(model_present);
         select(
@@ -155,6 +180,20 @@ impl CloudPage {
             Some(model_cap_index(config.model.max_adjustment)),
         );
         self.model_cap.setEnabled(model_present);
+        set_checked(&self.character, config.model.character_proposals);
+        self.character
+            .setEnabled(model_present && char_present && config.model.enabled);
+        if char_present {
+            self.character_note
+                .setStringValue(&NSString::from_str(CHARACTER_NOTE_OK));
+            self.character_note
+                .setTextColor(Some(&NSColor::secondaryLabelColor()));
+        } else {
+            self.character_note
+                .setStringValue(&NSString::from_str(CHARACTER_NOTE_MISSING));
+            self.character_note
+                .setTextColor(Some(&NSColor::systemOrangeColor()));
+        }
         set_checked(&self.enabled, config.predict.enabled);
         let cloud = config.predict.enabled;
         self.slots.setEnabled(cloud);

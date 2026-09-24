@@ -462,3 +462,24 @@ fn sentence_does_not_arbitrate_away_a_penalized_first_segmentation() {
     // 整句候选整体消失（plain_sentence 返回 None）之类更广的回归也会翻红
     assert_eq!(query.candidates.items[0].text, "您能帮我");
 }
+
+/// 整段拼出来的词库词要能翻掉「改了原样」的首切：`chuanganqi` 的首切是 `chuang an qi`，
+/// 它的最优路径靠 an→kan 敲错边读出 创刊起（多词、非原样），于是普通仲裁闸被关掉；
+/// 另一切 `chuan gan qi` 的 传感器 是整段一个词、按原样读，必须能按分数翻上来，
+/// 否则最后会给首切套一个干净但荒唐的 床安琪 整句候选压在 传感器 前面。
+#[test]
+fn sentence_whole_word_beats_a_penalized_first_segmentation() {
+    let dictionary = Dictionary::parse(
+        "创刊\tchuang kan\t50000\n起\tqi\t30000\n床\tchuang\t10\n安琪\tan qi\t10\n\
+         传感器\tchuan gan qi\t20000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("chuanganqi");
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "传感器");
+    assert!(
+        query.candidates.items.iter().all(|c| c.text != "床安琪"),
+        "干净的乱组合整句候选不该出现在列表里"
+    );
+}

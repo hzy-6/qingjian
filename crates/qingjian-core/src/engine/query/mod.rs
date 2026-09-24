@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod character;
 mod diversity;
 mod english_tail;
 mod result;
@@ -65,7 +66,10 @@ impl Engine {
             for candidate in &mut query.candidates.items {
                 if matches!(
                     candidate.kind,
-                    CandidateKind::Chinese | CandidateKind::Sentence | CandidateKind::Cloud
+                    CandidateKind::Chinese
+                        | CandidateKind::Sentence
+                        | CandidateKind::Cloud
+                        | CandidateKind::Local
                 ) {
                     let traditional_text = opencc.convert(&candidate.text);
                     self.traditional_map
@@ -519,13 +523,17 @@ impl Engine {
             else {
                 continue;
             };
+            // 对手就是整段输入的那一个词库词、且按原样读（`chuanganqi` → 传感器）：这是「用户把整个词
+            // 拼出来了」的硬信号。首切即使走了敲错 / 模糊边（`chuang an qi` 经 an→kan 读出 创刊起），
+            // 也允许被它按分数翻掉，否则整词候选会被一个多词乱组合压在后面。
+            let whole_word = paths[0].word_count() == 1 && !paths[0].altered();
             match &winner {
                 None => {
                     arbitrable = segmentation.incomplete_count() == 0 && !paths[0].altered();
                     winner = Some((segmentation, paths));
                 }
                 Some((current_seg, current_paths))
-                    if arbitrable
+                    if (arbitrable || whole_word)
                         && segmentation.incomplete_count() == 0
                         && segmentation.syllables.len() == current_seg.syllables.len()
                         && paths[0].score
@@ -537,6 +545,12 @@ impl Engine {
             }
         }
         let (best, mut paths) = winner?;
+        // 字符级整句提议：在静态切分仲裁之后、神经重排之前合池，只对胜出切分做一次。
+        // 词级路径与同音字级候选一起交给打分器，旧静态首选保留（见 `preselect_character_paths`）。
+        if paths.len() > 1 && self.has_sentence_scorer() && self.character_proposer.is_some() {
+            let dictionaries = self.all_dictionaries();
+            paths = self.with_character_proposals(paths, &dictionaries, self.neural_paths);
+        }
         // 与最优路径差得太远的不参与重排（重排只在接了打分器时发生，paths 长度大于 1 也只在那时出现）
         if paths.len() > 1 {
             let floor = paths[0].score - self.neural_margin;
@@ -696,14 +710,13 @@ impl Engine {
         expanded
     }
 
-    /// 本地整句转换把最优切分转成的汉字，给云端当参考（问字模式里就是问题的汉字形式）；转不出或有占位音节为空。
-    pub(super) fn local_guess(&self, segmentations: &[Segmentation]) -> String {
+    /// 本地整句转换的最优路径：给云端当参考（问字模式里就是问题的汉字形式），也给纠错生成同音变体；
+    /// 转不出或有占位音节为 `None`。
+    pub(super) fn local_conversion(&self, segmentations: &[Segmentation]) -> Option<Conversion> {
         segmentations
             .first()
             .and_then(|best| self.convert_sentence(&best.patterns(), true))
             .filter(|conversion| !conversion.has_placeholder())
-            .map(|conversion| conversion.text)
-            .unwrap_or_default()
     }
 
     /// 主词库与用户词一起查（每个位置多种写法）。用户词是用户自己选过的（云联想接受的词等），排序上靠 weight 自然靠前。

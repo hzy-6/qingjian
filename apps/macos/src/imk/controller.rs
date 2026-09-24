@@ -9,7 +9,7 @@ use objc2::{define_class, msg_send, sel};
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSMenu};
 use objc2_foundation::NSObjectProtocol;
 use objc2_input_method_kit::{IMKInputController, IMKServer};
-use qingjian_core::{Candidate, QUESTION_PREFIX};
+use qingjian_core::QUESTION_PREFIX;
 use qingjian_platform::{LayoutMode, Modifiers};
 
 use super::{TextClient, catch_panic, modifiers, recover_from_panic, secure_input};
@@ -722,10 +722,12 @@ impl QingjianInputController {
         } else {
             client.set_marked_text("", 0);
         }
-        // 先发联想再画：发出去就留好云端槽位，画出来的第一帧本地候选就已经在最终位置
+        // 先起联想的防抖再画：停键之后才真发请求（每键都发会把后台批次堆起来、挤掉重排）；
+        // 发出去时槽位已在最终位置，结果到了只补页尾几格。
         if !marked.is_empty() {
-            let candidates = host::with(|h| h.session.layout.local().to_vec()).unwrap_or_default();
-            self.request_prediction(client, &candidates);
+            host::with(|h| h.schedule_prediction());
+        } else {
+            host::with(|h| h.cancel_prediction());
         }
         self.render(client);
     }
@@ -754,40 +756,6 @@ impl QingjianInputController {
         host::with(|h| {
             h.anchor = anchor;
             h.render();
-        });
-    }
-
-    /// 发一次联想请求。Secure Input 里绝不发；没接联想器时是空操作。
-    ///
-    /// 读上下文要等应用回话，这段时间 IMK 可能把 `deactivateServer:` 之类的回调插进来，
-    /// 所以分两次借 Host：先拿策略、放开借用去读、再借回来发请求。
-    fn request_prediction(&self, client: TextClient<'_>, candidates: &[Candidate]) {
-        let policy = host::with(|h| {
-            if !h.engine.prediction_enabled() {
-                return None;
-            }
-            if secure_input::enabled() {
-                tracing::debug!("Secure Input 中，不联想");
-                h.cancel_prediction();
-                return None;
-            }
-            Some(h.engine.prediction_policy())
-        })
-        .flatten();
-        let Some(policy) = policy else {
-            return;
-        };
-        let surrounding = client.surrounding_text(policy.before, policy.after);
-        host::with(|h| {
-            tracing::debug!(
-                has_context = surrounding.is_some(),
-                pinyin = h.engine.composition().scope(),
-                "联想请求"
-            );
-            match h.engine.request_prediction(surrounding, candidates) {
-                Some(_) => h.await_prediction(),
-                None => h.cancel_prediction(),
-            }
         });
     }
 

@@ -205,6 +205,7 @@ fn format_candidate(candidate: &Candidate, width: usize) -> String {
         qingjian_core::CandidateKind::Chinese => "",
         qingjian_core::CandidateKind::English => "[en] ",
         qingjian_core::CandidateKind::Cloud => "☁ ",
+        qingjian_core::CandidateKind::Local => "[本机] ",
         qingjian_core::CandidateKind::Shortcut => "[v] ",
         qingjian_core::CandidateKind::Custom(_) => "[custom] ",
         qingjian_core::CandidateKind::Sentence => "[句] ",

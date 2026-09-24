@@ -55,6 +55,8 @@ foldhash = "0.2.0"
 ferrous-opencc = { version = "0.4.0", default-features = false, features = ["s2t-conversion"] }
 # .qj 数据容器：mmap 打开、结构体数组零拷贝读取
 memmap2 = "0.9"
+# 字符 n-gram 模型：只读映射的 FST（拼音约束整句字符提议用）
+fst = "0.4"
 zerocopy = { version = "0.8", features = ["derive"] }
 
 

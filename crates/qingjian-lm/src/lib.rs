@@ -11,9 +11,11 @@
 //! 概率是插值平滑：P(w|v) = λ·c(v,w)/c(v) + (1-λ)·c(w)/N。模型里没有的词交回 Core 用词库词频兜底。
 
 mod bigram_model;
+mod char_model;
 mod error;
 mod successor;
 mod word_entry;
 
 pub use bigram_model::{BigramModel, SENTENCE_START};
+pub use char_model::CharNgramModel;
 pub use error::LmError;

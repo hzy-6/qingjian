@@ -343,6 +343,9 @@ impl Host {
                 }
                 None => tracing::warn!(index, "不认识的模型修正上限档位"),
             },
+            (Setting::LocalModelCharacter, SettingValue::Bool(on)) => {
+                self.settings.set_bool("model", "character_proposals", on);
+            }
             (Setting::CloudSlots, SettingValue::Index(index)) => {
                 self.settings.set_value("predict", "slots", index as i64);
             }

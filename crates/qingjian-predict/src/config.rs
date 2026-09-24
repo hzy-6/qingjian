@@ -42,6 +42,10 @@ pub struct PredictConfig {
     /// 其余 minimal / low / medium / high / xhigh 照传；留空则不发（给不认这个参数的接口）。
     /// DeepSeek V4 这类默认带思考的模型不关会把 token 预算全花在思考上，正文为空。
     pub reasoning_effort: String,
+
+    /// 本地整句联想：用随包模型在本机推断整句接续（整句补全，Tab 接受），全程离线。
+    /// 需要本地整句模型（`[model] enabled`）加载；音节不超过两个的短输入不唤醒模型。
+    pub local: bool,
 }
 
 impl Default for PredictConfig {
@@ -59,6 +63,7 @@ impl Default for PredictConfig {
             slots: 2,
             sentence: true,
             reasoning_effort: "none".to_owned(),
+            local: true,
         }
     }
 }
