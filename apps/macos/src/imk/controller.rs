@@ -10,7 +10,7 @@ use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSMenu};
 use objc2_foundation::NSObjectProtocol;
 use objc2_input_method_kit::{IMKInputController, IMKServer};
 use qingjian_core::{Candidate, QUESTION_PREFIX};
-use qingjian_platform::Modifiers;
+use qingjian_platform::{LayoutMode, Modifiers};
 
 use super::{TextClient, catch_panic, modifiers, recover_from_panic, secure_input};
 use crate::candidates::Preedit;
@@ -618,15 +618,31 @@ impl QingjianInputController {
             host::with(|h| h.engine.delete_forward());
             self.refresh(client);
         } else if selector == sel!(moveDown:) {
-            self.move_highlight(1, client);
+            // 竖排上下移动高亮（越页自动翻）；横排上下就是翻页
+            if self.vertical_layout() {
+                self.move_highlight(1, client);
+            } else {
+                self.turn_page(1, client);
+            }
         } else if selector == sel!(moveUp:) {
-            self.move_highlight(-1, client);
+            if self.vertical_layout() {
+                self.move_highlight(-1, client);
+            } else {
+                self.turn_page(-1, client);
+            }
         } else if selector == sel!(moveLeft:) {
-            host::with(|h| h.engine.move_cursor_left());
-            self.refresh(client);
+            // 竖排左右翻页；横排左右逐项移动高亮，越页自动翻
+            if self.vertical_layout() {
+                self.turn_page(-1, client);
+            } else {
+                self.move_highlight(-1, client);
+            }
         } else if selector == sel!(moveRight:) {
-            host::with(|h| h.engine.move_cursor_right());
-            self.refresh(client);
+            if self.vertical_layout() {
+                self.turn_page(1, client);
+            } else {
+                self.move_highlight(1, client);
+            }
         } else if selector == sel!(moveWordLeft:) {
             // ⌥←：光标往左跳一个音节
             host::with(|h| h.engine.move_cursor_syllable_left());
@@ -785,6 +801,11 @@ impl QingjianInputController {
         client.insert_text_replacing_marked(&text);
         self.refresh(client);
         true
+    }
+
+    /// 候选窗口是不是竖排（配置 `[general] layout`）。
+    fn vertical_layout(&self) -> bool {
+        host::with(|h| h.settings.config().general.layout == LayoutMode::Vertical).unwrap_or(true)
     }
 
     /// 高亮上下移动，越过页边自动翻页。
